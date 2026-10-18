@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}履歴 | 業務時間管理{% endblock %}
+{% block content %}
+<section class="hero compact-hero">
+  <div><span class="eyebrow">HISTORY</span><h2>履歴</h2><p>当日表示は毎日リセットされますが、過去記録はSQLiteに保持しています。</p></div>
+</section>
+
+<section class="card">
+  <div class="section-head"><div><h2>勤怠履歴</h2></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>日付</th><th>開始</th><th>休憩</th><th>終了</th><th>実働</th></tr></thead>
+      <tbody>
+      {% for item in attendance_items %}
+        <tr>
+          <td>{{ item.row.work_date }}</td>
+          <td>{{ item.row.start_time or '--' }}</td>
+          <td>{{ item.summary.break|minutes }}</td>
+          <td>{{ item.row.end_time or '--' }}</td>
+          <td><strong>{{ item.summary.net|minutes }}</strong></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">履歴なし</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="section-head"><div><h2>タスク作業履歴</h2></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>日付</th><th>タスク</th><th>開始</th><th>終了</th><th>時間</th></tr></thead>
+      <tbody>
+      {% for row in task_rows %}
+        <tr><td>{{ row.work_date }}</td><td>{{ row.name }}</td><td>{{ row.start_time }}</td><td>{{ row.end_time }}</td><td><strong>{{ row.duration_minutes }}分</strong></td></tr>
+      {% else %}
+        <tr><td colspan="5">履歴なし</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

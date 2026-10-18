@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}今日 | 業務時間管理{% endblock %}
+{% block content %}
+<section class="hero" data-work-date="{{ today }}">
+  <div>
+    <span class="eyebrow">TODAY</span>
+    <h2>{{ today }}</h2>
+    <p>日付が変わると表示中の作業時間は自動的に0へ戻ります。タスク名は残ります。</p>
+  </div>
+  <div class="hero-total">
+    <span>本日のタスク合計</span>
+    <strong>{{ total_task_minutes|minutes }}</strong>
+  </div>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <div>
+      <span class="eyebrow">ATTENDANCE</span>
+      <h2>業務時間</h2>
+    </div>
+    <div class="metric">
+      <span>実働時間</span>
+      <strong>{{ attendance_summary.net_text }}</strong>
+    </div>
+  </div>
+
+  <form class="attendance-grid" method="post" action="{{ url_for('save_attendance') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+    <label>開始時間
+      <input type="time" name="start_time" value="{{ attendance.start_time if attendance and attendance.start_time else '' }}">
+    </label>
+    <label>休憩開始
+      <input type="time" name="break_start" value="{{ attendance.break_start if attendance and attendance.break_start else '' }}">
+    </label>
+    <label>休憩終了
+      <input type="time" name="break_end" value="{{ attendance.break_end if attendance and attendance.break_end else '' }}">
+    </label>
+    <label>終了時間
+      <input type="time" name="end_time" value="{{ attendance.end_time if attendance and attendance.end_time else '' }}">
+    </label>
+    <button class="primary" type="submit">保存・再計算</button>
+  </form>
+
+  <div class="summary-row">
+    <div><span>拘束時間</span><b>{{ attendance_summary.gross|minutes }}</b></div>
+    <div><span>休憩時間</span><b>{{ attendance_summary.break|minutes }}</b></div>
+    <div><span>実働時間</span><b>{{ attendance_summary.net|minutes }}</b></div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <div>
+      <span class="eyebrow">TASKS</span>
+      <h2>タスク時間</h2>
+    </div>
+  </div>
+
+  <form class="add-task" method="post" action="{{ url_for('add_task') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+    <input name="name" maxlength="120" placeholder="例：月次レポート作成" required>
+    <button class="primary" type="submit">タスク追加</button>
+  </form>
+
+  {% if tasks %}
+  <div class="task-list">
+    {% for task in tasks %}
+      <article class="task-row">
+        <div class="task-main">
+          <div class="task-title-row">
+            <h3>{{ task.name }}</h3>
+            <span class="pill">今日 {{ task.today_minutes|minutes }}</span>
+          </div>
+          <form class="session-form" method="post" action="{{ url_for('add_task_session', task_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+            <label>開始 <input type="time" name="start_time" required></label>
+            <span class="arrow">→</span>
+            <label>終了 <input type="time" name="end_time" required></label>
+            <button type="submit">時間を記録</button>
+          </form>
+        </div>
+        <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('タスクとその時間記録を削除しますか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+          <button class="danger ghost" type="submit">削除</button>
+        </form>
+      </article>
+    {% endfor %}
+  </div>
+  {% else %}
+    <div class="empty">まだタスクがありません。上の入力欄から追加してください。</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <div>
+      <span class="eyebrow">TODAY LOG</span>
+      <h2>本日の作業ログ</h2>
+    </div>
+  </div>
+  {% if sessions %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>タスク</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
+        <tbody>
+          {% for s in sessions %}
+          <tr>
+            <td>{{ s.task_name }}</td><td>{{ s.start_time }}</td><td>{{ s.end_time }}</td>
+            <td><strong>{{ s.duration_minutes }}分</strong></td>
+            <td>
+              <form method="post" action="{{ url_for('delete_session', session_id=s.id) }}" onsubmit="return confirm('この時間記録を削除しますか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+                <button class="danger ghost compact" type="submit">削除</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty">本日の作業記録はまだありません。</div>
+  {% endif %}
+</section>
+<section class="card" id="notes">
+  <div class="section-head"><div><h2>メモ</h2></div></div>
+  <p>日付が変わっても残る共通メモです。編集後は保存してください。</p>
+  <form method="post" action="{{ url_for('save_note') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="note-content">メモ内容（10,000文字まで）</label>
+    <textarea id="note-content" name="content" rows="7" maxlength="10000" placeholder="申し送りや、忘れずに対応したいことなど">{{ note }}</textarea>
+    <button class="primary" type="submit">メモを保存</button>
+  </form>
+</section>
+{% endblock %}
+
