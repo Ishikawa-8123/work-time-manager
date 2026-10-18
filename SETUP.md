@@ -1,5 +1,7 @@
 # クローン後の実行手順
 
+以下の1〜8はWindows用です。WSLのUbuntuでは「9. WSL（Ubuntu）で実行」を参照してください。
+
 ## 1. 必要なもの
 
 - Windows PC
@@ -92,3 +94,60 @@ git pull --ff-only
 | タスクやメモが消えたように見える | 起動したフォルダが以前と同じか、そのフォルダに使用していた `work_time.db` があるか確認する。 |
 
 このアプリは `127.0.0.1` で待ち受け、使用中のPCからアクセスします。GitHubでコードを公開しても、ローカルのアプリやDBが自動的にインターネットへ公開されることはありません。
+
+## 9. WSL（Ubuntu）で実行
+
+WSLとUbuntuが導入済みの環境で、Ubuntuのターミナルを開いて実行してください。アプリにはPython 3.10以降が必要です。
+
+### 初回セットアップ
+
+```bash
+sudo apt update
+sudo apt install python3 python3-venv git
+python3 --version
+
+cd ~
+git clone https://github.com/Ishikawa-8123/work-time-manager.git
+cd work-time-manager
+
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python app.py
+```
+
+`python3 --version` が3.10未満の場合は、対応するPythonを用意してから進めてください。すでにUbuntu側にクローン済みなら、`git clone` を繰り返さず、そのフォルダで仮想環境の作成以降を実行します。非公開リポジトリの取得にはアクセス権のあるGitHubアカウントでの認証が必要です。
+
+Windowsで作った `.venv` は流用せず、Ubuntu側のホームディレクトリに別途クローンし、UbuntuのPythonで作成します。仮想環境は移動・コピーするより対象環境で再作成するものです（[Python公式説明](https://docs.python.org/3/library/venv.html)）。`start.bat` はUbuntuでは使いません。
+
+### ブラウザで開く
+
+ターミナルに `Running on http://127.0.0.1:5000` と表示されたら、Windowsのブラウザで http://localhost:5000 を開きます。WSLのアプリへWindowsから `localhost` でアクセスする方法は[Microsoft公式説明](https://learn.microsoft.com/en-us/windows/wsl/networking)を参照してください。
+
+接続できない場合は、Ubuntu内で `curl http://127.0.0.1:5000` を実行してサーバーの応答を確認します（curlがない場合は `sudo apt install curl`）。Ubuntu内では応答するのにWindowsから開けない場合は、WSLのネットワーク設定を確認してください。また、Windows側で同じアプリを起動していないか確認します。
+
+### 停止・2回目以降の起動
+
+停止は、起動中のUbuntuターミナルで **Ctrl + C** を押します。ブラウザを閉じるだけでは停止しません。
+
+次回はUbuntuで次を実行します。
+
+```bash
+cd ~/work-time-manager
+.venv/bin/python app.py
+```
+
+保存先を変えた場合は `cd` のパスを置き換えてください。
+
+### データと更新
+
+DBはUbuntu側のプロジェクト内の `work_time.db` に自動保存されます。別途クローンしたWindows版とは別のDBなので、記録は自動共有されません。バックアップはアプリ停止後にこのDBをコピーします。空のDBのコピーは不要です。
+
+更新は停止・バックアップ後、Ubuntuのプロジェクトフォルダで次を実行し、その後に再起動します。
+
+```bash
+git pull --ff-only
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python app.py
+```
+
+この手順はコードと公式ドキュメントに基づいています。WSL環境での実動作確認は未実施です。

@@ -48,6 +48,8 @@ python app.py
 
 ## macOS / Linux
 
+WSLのUbuntuでの初回セットアップ・起動・停止・更新は、[実行手順書の「9. WSL（Ubuntu）で実行」](SETUP.md#9-wslubuntuで実行)を参照してください。
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
