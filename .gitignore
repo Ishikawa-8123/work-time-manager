@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 *.db
 *.db-journal
+!work_time.empty.db
