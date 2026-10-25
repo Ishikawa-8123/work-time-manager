@@ -316,7 +316,7 @@ def test_overtime_separates_weekdays_weekends_and_months():
     with app_module.get_db() as db:
         for work_date, start, end, bs, be in [
             ('2026-10-19', '09:00', '19:00', '12:00', '13:00'),  # 実働9h、残業1h
-            ('2026-10-20', '09:00', '17:00', '12:00', '13:00'),  # 実働7h、残業0h（相殺しない）
+            ('2026-10-20', '09:00', '17:00', '12:00', '13:00'),  # 実働7h、前日の超過1hと相殺
             ('2026-10-21', '09:00', None, None, None),          # 未完了を除外
             ('2026-10-24', '09:00', '12:00', None, None),      # 土曜3h
             ('2026-10-25', '13:00', '15:30', None, None),      # 日曜2.5h
@@ -329,15 +329,44 @@ def test_overtime_separates_weekdays_weekends_and_months():
         week = app_module.weekly_summary(db, date(2026, 10, 25))
         month = app_module.monthly_overtime(db, date(2026, 10, 25))
         next_month = app_module.monthly_overtime(db, date(2026, 11, 1))
-    assert week['weekday_overtime'] == 60
+    assert week['weekday_balance'] == 0 and week['weekday_overtime'] == 0
     assert week['weekend_overtime'] == 330
-    assert week['overtime'] == 390 and week['incomplete'] == 1
-    assert month['weekday_overtime'] == 60 and month['weekend_overtime'] == 510
-    assert month['overtime'] == 570 and month['incomplete'] == 1
+    assert week['overtime'] == 330 and week['incomplete'] == 1
+    assert month['weekday_balance'] == 0 and month['weekday_overtime'] == 0
+    assert month['weekend_overtime'] == 510
+    assert month['overtime'] == 510 and month['incomplete'] == 1
     assert next_month['weekday_overtime'] == 0 and next_month['weekend_overtime'] == 120
     page = app_module.app.test_client().get('/reports?date=2026-10-25').get_data(as_text=True)
     assert '2026-10 の残業時間' in page and '＋8時間 30分（510分）' in page
     assert page.index('id="monthly-overtime"') > page.index('一週間の業務時間')
+
+
+def test_overtime_offsets_weekday_shortfall_only_within_each_period():
+    from datetime import date
+    with app_module.get_db() as db:
+        for work_date, start, end in [
+            ('2026-10-26', '09:00', '19:00'),  # 月曜、実働9h
+            ('2026-10-27', '09:00', '17:00'),  # 火曜、実働7h
+            ('2026-10-28', '09:00', '20:00'),  # 水曜、実働10h
+            ('2026-11-02', '09:00', '17:00'),  # 翌月、実働7h
+            ('2026-11-07', '09:00', '11:00'),  # 土曜、実働2h
+        ]:
+            db.execute('INSERT INTO attendance(work_date,start_time,end_time,break_start,break_end,updated_at) VALUES (?,?,?,?,?,?)',
+                       (work_date, start, end, '12:00' if work_date < '2026-11-07' else None,
+                        '13:00' if work_date < '2026-11-07' else None, 'test'))
+        db.commit()
+        october_week = app_module.weekly_summary(db, date(2026, 10, 28))
+        october = app_module.monthly_overtime(db, date(2026, 10, 28))
+        november_week = app_module.weekly_summary(db, date(2026, 11, 7))
+        november = app_module.monthly_overtime(db, date(2026, 11, 7))
+    assert october_week['weekday_balance'] == 120
+    assert october_week['weekday_overtime'] == 120
+    assert october['weekday_overtime'] == 120
+    assert november_week['weekday_balance'] == -60
+    assert november_week['weekday_overtime'] == 0
+    assert november_week['weekend_overtime'] == 120
+    assert november_week['overtime'] == 120
+    assert november['weekday_balance'] == -60 and november['overtime'] == 120
 
 
 def test_calendar_week_crosses_year_and_month_layout():

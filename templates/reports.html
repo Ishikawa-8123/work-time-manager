@@ -42,15 +42,15 @@
 {% include "_week.html" %}
 <section class="card" id="monthly-overtime">
   <div class="section-head"><div><span class="eyebrow">MONTHLY OVERTIME</span><h2>{{ month.month }} の残業時間</h2></div></div>
-  <p>上で選択した日付の月を集計します。平日は1日8時間を超えた実働、土日は全実働が対象です。未完了の勤怠は集計しません（{{ month.incomplete }}日）。</p>
+  <p>上で選択した日付の月を集計します。平日は勤怠を完了した日ごとに8時間を基準とし、月内の超過時間と不足時間を相殺します（差：{{ month.weekday_balance|signed_minutes }}）。未記録・未完了の日は基準に含めません（未完了 {{ month.incomplete }}日）。土日は全実働を別枠で加算します。</p>
   <div class="summary-row overtime-summary">
     <div><span>平日の残業</span><b>{{ month.weekday_overtime|minutes }}</b></div>
     <div><span>土日の残業（別枠）</span><b>＋{{ month.weekend_overtime|minutes }}</b></div>
     <div><span>月の残業合計</span><b>{{ month.overtime|minutes }}</b></div>
   </div>
   <details><summary>日別の残業内訳を表示</summary>
-    <div class="table-wrap"><table><thead><tr><th>日付</th><th>実働</th><th>平日の残業</th><th>土日の残業</th></tr></thead>
-      <tbody>{% for item in month.days %}<tr><td>{{ item.date }}（{{ item.weekday }}）</td><td>{{ item.net|minutes }}</td><td>{{ item.weekday_overtime|minutes if item.net is not none else '--' }}</td><td>{% if item.net is not none %}＋{{ item.weekend_overtime|minutes }}{% else %}--{% endif %}</td></tr>
+    <div class="table-wrap"><table><thead><tr><th>日付</th><th>実働</th><th>平日8時間との差</th><th>土日の残業</th></tr></thead>
+      <tbody>{% for item in month.days %}<tr><td>{{ item.date }}（{{ item.weekday }}）</td><td>{{ item.net|minutes }}</td><td>{{ item.weekday_difference|signed_minutes }}</td><td>{% if item.net is not none and item.weekday_difference is none %}＋{{ item.weekend_overtime|minutes }}{% else %}--{% endif %}</td></tr>
       {% else %}<tr><td colspan="4">この月の勤怠記録はありません。</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>

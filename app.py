@@ -152,6 +152,12 @@ def format_minutes(total: int | None) -> str:
     return f"{hours}時間 {mins}分（{max(total, 0)}分）"
 
 
+def format_signed_minutes(total: int | None) -> str:
+    if total is None:
+        return "--"
+    return ("＋" if total >= 0 else "−") + format_minutes(abs(total))
+
+
 def selected_date(value: str | None) -> date:
     if not value:
         return today_jst()
@@ -182,22 +188,28 @@ def weekly_summary(db: sqlite3.Connection, day: date) -> dict:
         days.append({"date": work_date, "weekday": "月火水木金土日"[offset],
                      "summary": summary, "task_minutes": task_minutes.get(work_date, 0),
                      **overtime_for_day(date.fromisoformat(work_date), summary["net"])})
+    weekday_balance = sum(item["weekday_difference"] or 0 for item in days)
+    weekday_overtime = max(weekday_balance, 0)
+    weekend_overtime = sum(item["weekend_overtime"] for item in days)
     return {"start": start.isoformat(), "end": end.isoformat(), "days": days,
             "gross": sum(item["summary"]["gross"] or 0 for item in days),
             "break": sum(item["summary"]["break"] or 0 for item in days if item["summary"]["gross"] is not None),
             "net": sum(item["summary"]["net"] or 0 for item in days),
             "task_minutes": sum(task_minutes.values()),
-            "weekday_overtime": sum(item["weekday_overtime"] for item in days),
-            "weekend_overtime": sum(item["weekend_overtime"] for item in days),
-            "overtime": sum(item["overtime"] for item in days),
+            "weekday_balance": weekday_balance,
+            "weekday_overtime": weekday_overtime,
+            "weekend_overtime": weekend_overtime,
+            "overtime": weekday_overtime + weekend_overtime,
             "incomplete": sum(bool(row["start_time"] or row["end_time"] or row["break_start"] or row["break_end"])
                               and attendance_summary(row)["gross"] is None for row in rows)}
 
 
 def overtime_for_day(day: date, net: int | None) -> dict:
-    weekday = max((net or 0) - 8 * 60, 0) if day.weekday() < 5 else 0
+    weekday_difference = net - 8 * 60 if net is not None and day.weekday() < 5 else None
+    weekday = max(weekday_difference or 0, 0)
     weekend = (net or 0) if day.weekday() >= 5 else 0
-    return {"weekday_overtime": weekday, "weekend_overtime": weekend, "overtime": weekday + weekend}
+    return {"weekday_difference": weekday_difference, "weekday_overtime": weekday,
+            "weekend_overtime": weekend, "overtime": weekday + weekend}
 
 
 def monthly_overtime(db: sqlite3.Connection, day: date) -> dict:
@@ -211,10 +223,14 @@ def monthly_overtime(db: sqlite3.Connection, day: date) -> dict:
         net = attendance_summary(row)["net"]
         days.append({"date": row["work_date"], "weekday": "月火水木金土日"[work_day.weekday()],
                      "net": net, **overtime_for_day(work_day, net)})
+    weekday_balance = sum(item["weekday_difference"] or 0 for item in days)
+    weekday_overtime = max(weekday_balance, 0)
+    weekend_overtime = sum(item["weekend_overtime"] for item in days)
     return {"month": start.strftime('%Y-%m'), "days": days,
-            "weekday_overtime": sum(item["weekday_overtime"] for item in days),
-            "weekend_overtime": sum(item["weekend_overtime"] for item in days),
-            "overtime": sum(item["overtime"] for item in days),
+            "weekday_balance": weekday_balance,
+            "weekday_overtime": weekday_overtime,
+            "weekend_overtime": weekend_overtime,
+            "overtime": weekday_overtime + weekend_overtime,
             "incomplete": sum(item["net"] is None for item in days)}
 
 
@@ -241,6 +257,11 @@ def attendance_summary(row: sqlite3.Row | None) -> dict[str, int | None | str]:
 @app.template_filter("minutes")
 def minutes_filter(value: int | None) -> str:
     return format_minutes(value)
+
+
+@app.template_filter("signed_minutes")
+def signed_minutes_filter(value: int | None) -> str:
+    return format_signed_minutes(value)
 
 
 @app.route("/")
