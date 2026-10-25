@@ -1,0 +1,16 @@
+<section class="card">
+  <div class="section-head">
+    <div><span class="eyebrow">WEEK</span><h2>一週間の業務時間</h2><p>{{ week.start }}（月）〜 {{ week.end }}（日）</p></div>
+    <div class="metric"><span>週の実働合計</span><strong>{{ week.net|minutes }}</strong></div>
+  </div>
+  <p>勤務開始日の週に集計します。開始・終了が揃った勤怠を合計します。未完了の勤怠：{{ week.incomplete }}日。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>日付</th><th>拘束時間</th><th>休憩時間</th><th>実働時間</th><th>タスク時間</th></tr></thead>
+    <tbody>{% for item in week.days %}
+      <tr><td><a href="{{ url_for('reports', date=item.date) }}">{{ item.date }}（{{ item.weekday }}）</a></td>
+        <td>{{ item.summary.gross|minutes }}</td><td>{{ item.summary.break|minutes }}</td>
+        <td>{{ item.summary.net|minutes }}</td><td>{{ item.task_minutes|minutes }}</td></tr>
+    {% endfor %}</tbody>
+    <tfoot><tr><th>合計</th><td>{{ week.gross|minutes }}</td><td>{{ week.break|minutes }}</td><td>{{ week.net|minutes }}</td><td>{{ week.task_minutes|minutes }}</td></tr></tfoot>
+  </table></div>
+</section>

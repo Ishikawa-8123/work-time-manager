@@ -73,14 +73,21 @@ def test_day_rollover_and_persistence(monkeypatch):
         assert db.execute("SELECT count(*) FROM attendance").fetchone()[0] == 0
 
 
-def test_delete_cascades():
+def test_delete_task_preserves_history():
     client = app_module.app.test_client()
     post(client, "/tasks", data={"name": "削除テスト"})
     post(client, "/tasks/1/session", data={"start_time": "09:00", "end_time": "10:00"})
     post(client, "/tasks/1/delete")
     with app_module.get_db() as db:
-        assert db.execute("SELECT count(*) FROM tasks").fetchone()[0] == 0
-        assert db.execute("SELECT count(*) FROM task_sessions").fetchone()[0] == 0
+        assert db.execute("SELECT deleted_at FROM tasks").fetchone()[0] is not None
+        assert db.execute("SELECT count(*) FROM task_sessions").fetchone()[0] == 1
+    text = client.get("/").get_data(as_text=True)
+    assert '/tasks/1/session' not in text
+    assert '1時間 0分（60分）' in text
+    assert '削除テスト' in client.get('/history?task_id=1').get_data(as_text=True)
+    post(client, '/tasks/1/session', data={'start_time': '10:00', 'end_time': '11:00'})
+    with app_module.get_db() as db:
+        assert db.execute("SELECT count(*) FROM task_sessions").fetchone()[0] == 1
 
 
 @pytest.fixture(autouse=True)
@@ -127,4 +134,113 @@ def test_attendance_net_time():
     )
     text = response.get_data(as_text=True)
     assert "8時間 0分" in text
+
+
+def test_migrate_original_database_without_losing_data(tmp_path, monkeypatch):
+    import shutil
+    original = Path(app_module.__file__).parent / 'work_time.empty.db'
+    target = tmp_path / 'original.db'
+    shutil.copyfile(original, target)
+    monkeypatch.setattr(app_module, 'DB_PATH', target)
+    with app_module.get_db() as db:
+        db.execute("INSERT INTO tasks(name, created_at) VALUES ('旧タスク', '2026-10-18')")
+        db.execute("INSERT INTO task_sessions(task_id, work_date, start_time, end_time, duration_minutes, created_at) "
+                   "VALUES (1, '2026-10-18', '09:00', '10:00', 60, '2026-10-18')")
+        db.execute("INSERT INTO attendance(work_date, start_time, end_time, updated_at) "
+                   "VALUES ('2026-10-18', '09:00', '18:00', '2026-10-18')")
+        db.execute("INSERT INTO notes VALUES (1, '保存済みメモ')")
+    app_module.init_db()
+    app_module.init_db()
+    with app_module.get_db() as db:
+        assert db.execute('SELECT name, deleted_at FROM tasks').fetchone()[:] == ('旧タスク', None)
+        assert db.execute('SELECT duration_minutes, content FROM task_sessions').fetchone()[:] == (60, '')
+        assert db.execute('SELECT start_time FROM attendance').fetchone()[0] == '09:00'
+        assert db.execute('SELECT content FROM notes').fetchone()[0] == '保存済みメモ'
+    assert app_module.app.test_client().get('/reports?date=2026-10-18').status_code == 200
+
+
+def test_history_filters_task_independently_of_content(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    post(client, '/tasks', data={'name': '資料作成'})
+    post(client, '/tasks', data={'name': '会議'})
+    for day, task_id, content in [(19, 1, '月次資料'), (20, 1, '週次資料'), (21, 2, '月次資料')]:
+        monkeypatch.setattr(app_module, 'today_jst', lambda day=day: date(2026, 10, day))
+        post(client, f'/tasks/{task_id}/session', data={'start_time': '09:00', 'end_time': '11:30', 'content': content})
+    text = client.get('/history?task_id=1').get_data(as_text=True)
+    assert '月次資料' in text and '週次資料' in text
+    assert '2026-10-19' in text and '2026-10-20' in text
+    assert '2026-10-21' not in text
+    assert '5時間 0分（300分）' in text
+    text = client.get('/history?date=2026-10-20&task_id=1').get_data(as_text=True)
+    assert '週次資料' in text and '月次資料' not in text
+    assert '2時間 30分（150分）' in text
+    assert '該当する作業履歴はありません' in client.get('/history?task_id=999').get_data(as_text=True)
+    post(client, '/tasks/1/delete')
+    assert '週次資料' in client.get('/history?task_id=1').get_data(as_text=True)
+    response = post(client, '/sessions/2/delete', data={'return_to': 'history'}, follow_redirects=True)
+    assert '週次資料' not in response.get_data(as_text=True)
+    assert '月次資料' in client.get('/history?task_id=1').get_data(as_text=True)
+
+
+def test_week_monday_sunday_year_boundary_and_incomplete():
+    from datetime import date
+    with app_module.get_db() as db:
+        for day in ['2026-12-27', '2026-12-28', '2027-01-03', '2027-01-04']:
+            db.execute("INSERT INTO attendance(work_date, start_time, break_start, break_end, end_time, updated_at) "
+                       "VALUES (?, '09:00', '12:00', '13:00', '18:00', ?)", (day, day))
+        db.execute("INSERT INTO attendance(work_date, start_time, updated_at) VALUES ('2026-12-29', '09:00', 'now')")
+        db.commit()
+        week = app_module.weekly_summary(db, date(2027, 1, 3))
+    assert week['start'] == '2026-12-28' and week['end'] == '2027-01-03'
+    assert week['net'] == 960 and week['gross'] == 1080 and week['break'] == 120
+    assert week['incomplete'] == 1
+    assert len(week['days']) == 7
+    assert week['days'][1]['summary']['net'] is None
+
+
+def test_daily_report_date_persistence_and_deletion(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, 'today_jst', lambda: date(2026, 10, 19))
+    post(client, '/tasks', data={'name': '開発'})
+    post(client, '/tasks/1/session', data={'start_time': '23:30', 'end_time': '00:15', 'content': '<script>内容</script>'})
+    post(client, '/attendance', data={'start_time': '22:00', 'end_time': '01:00'})
+    post(client, '/reports', data={'work_date': '2026-10-19', 'content': '成果\n<script>追記</script>'})
+    monkeypatch.setattr(app_module, 'today_jst', lambda: date(2026, 10, 20))
+    app_module.init_db()
+    text = client.get('/reports?date=2026-10-19').get_data(as_text=True)
+    assert '成果' in text and '&lt;script&gt;追記' in text
+    assert '&lt;script&gt;内容' in text and '0時間 45分（45分）' in text
+    assert '3時間 0分（180分）' in text
+    assert '&lt;script&gt;追記' not in client.get('/reports?date=2026-10-20').get_data(as_text=True)
+    post(client, '/reports', data={'work_date': '2026-10-19', 'action': 'delete'})
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM daily_reports').fetchone()[0] == 0
+        assert db.execute('SELECT count(*) FROM task_sessions').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM attendance').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('url', ['/reports?date=invalid', '/reports?date=9999-12-31',
+                                '/history?date=2026-02-30', '/history?task_id=oops',
+                                '/history?task_id=99999999999999999999999999'])
+def test_invalid_history_and_report_parameters(url):
+    assert app_module.app.test_client().get(url).status_code == 400
+
+
+def test_new_forms_validation_and_csrf():
+    client = app_module.app.test_client()
+    assert client.post('/reports', data={'work_date': '2026-10-19', 'content': 'test'}).status_code == 400
+    assert post(client, '/reports', data={'work_date': '2026-10-19', 'content': 'x' * 10001}).status_code == 400
+    assert post(client, '/reports', data={'content': 'missing date'}).status_code == 400
+    post(client, '/tasks', data={'name': 'test'})
+    assert post(client, '/tasks/1/session', data={'start_time': '09:00', 'end_time': '10:00', 'content': 'x' * 2001}).status_code == 400
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM task_sessions').fetchone()[0] == 0
+
+
+def test_all_duration_formats():
+    assert app_module.format_minutes(150) == '2時間 30分（150分）'
+    assert app_module.format_minutes(0) == '0時間 0分（0分）'
+    assert app_module.format_minutes(None) == '--'
 

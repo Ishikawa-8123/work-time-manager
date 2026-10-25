@@ -2,9 +2,23 @@
 {% block title %}履歴 | 業務時間管理{% endblock %}
 {% block content %}
 <section class="hero compact-hero">
-  <div><span class="eyebrow">HISTORY</span><h2>履歴</h2><p>当日表示は毎日リセットされますが、過去記録はSQLiteに保持しています。</p></div>
+  <div><span class="eyebrow">HISTORY</span><h2>履歴</h2><p>入力一覧から削除したタスクも、過去の作業記録は残ります。</p></div>
 </section>
 
+<section class="card">
+  <h2>履歴の絞り込み</h2>
+  <form class="filters" method="get" action="{{ url_for('history') }}">
+    <label>日付（空欄は全日）<input type="date" name="date" value="{{ selected_date }}"></label>
+    <label>タスク<select name="task_id"><option value="">すべてのタスク</option>
+      {% for task in tasks %}<option value="{{ task.id }}" {% if selected_task == task.id|string %}selected{% endif %}>{{ task.name }}{% if task.deleted_at %}（一覧から削除済み）{% endif %}［#{{ task.id }}］</option>{% endfor %}
+    </select></label>
+    <button class="primary" type="submit">絞り込む</button><a href="{{ url_for('history') }}">解除</a>
+  </form>
+  <p>タスクを選ぶと、そのタスクを記録した日だけ表示します。作業内容の一致は不要です。日付とタスクを組み合わせて絞り込めます。</p>
+  <p>絞り込み結果のタスク時間：<strong>{{ total_minutes|minutes }}</strong></p>
+</section>
+
+{% if not selected_task %}
 <section class="card">
   <div class="section-head"><div><h2>勤怠履歴</h2></div></div>
   <div class="table-wrap">
@@ -13,7 +27,7 @@
       <tbody>
       {% for item in attendance_items %}
         <tr>
-          <td>{{ item.row.work_date }}</td>
+          <td><a href="{{ url_for('reports', date=item.row.work_date) }}">{{ item.row.work_date }}</a></td>
           <td>{{ item.row.start_time or '--' }}</td>
           <td>{{ item.summary.break|minutes }}</td>
           <td>{{ item.row.end_time or '--' }}</td>
@@ -26,20 +40,33 @@
     </table>
   </div>
 </section>
+{% endif %}
 
 <section class="card">
-  <div class="section-head"><div><h2>タスク作業履歴</h2></div></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>日付</th><th>タスク</th><th>開始</th><th>終了</th><th>時間</th></tr></thead>
-      <tbody>
-      {% for row in task_rows %}
-        <tr><td>{{ row.work_date }}</td><td>{{ row.name }}</td><td>{{ row.start_time }}</td><td>{{ row.end_time }}</td><td><strong>{{ row.duration_minutes }}分</strong></td></tr>
-      {% else %}
-        <tr><td colspan="5">履歴なし</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <h2>タスクごとの合計</h2>
+  {% for task_id, item in task_totals.items() %}
+    <p><a href="{{ url_for('history', task_id=task_id, date=selected_date) }}">{{ item.name }}</a>：{{ item.total|minutes }} ／ {{ item.dates|length }}日</p>
+  {% else %}<p>該当する記録はありません。</p>{% endfor %}
+</section>
+
+<section class="card">
+  <h2>日ごとのタスク作業履歴</h2>
+  {% for work_date, group in days.items() %}
+  <section class="history-day">
+    <h3><a href="{{ url_for('history', date=work_date, task_id=selected_task) }}">{{ work_date }}</a> ／ {{ group.total|minutes }}</h3>
+    <p><a href="{{ url_for('reports', date=work_date) }}">この日の日報を開く</a></p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>タスク</th><th>内容</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
+      <tbody>{% for row in group.rows %}
+        <tr><td><a href="{{ url_for('history', task_id=row.task_id) }}">{{ row.name }}</a></td><td class="content-cell">{{ row.content or '--' }}</td><td>{{ row.start_time }}</td><td>{{ row.end_time }}</td><td>{{ row.duration_minutes|minutes }}</td>
+          <td><form method="post" action="{{ url_for('delete_session', session_id=row.id) }}" onsubmit="return confirm('この作業記録を履歴から削除しますか？この操作は元に戻せません。');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="history">
+            <button class="danger ghost compact" type="submit">記録を削除</button>
+          </form></td>
+        </tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% else %}<p class="empty">該当する作業履歴はありません。</p>{% endfor %}
 </section>
 {% endblock %}

@@ -74,10 +74,11 @@
             <label>開始 <input type="time" name="start_time" required></label>
             <span class="arrow">→</span>
             <label>終了 <input type="time" name="end_time" required></label>
+            <label class="session-content">作業内容（任意）<textarea name="content" rows="2" maxlength="2000" placeholder="例：10月分の売上集計"></textarea></label>
             <button type="submit">時間を記録</button>
           </form>
         </div>
-        <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('タスクとその時間記録を削除しますか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
+        <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('入力一覧からタスクを削除しますか？過去の作業履歴は残ります。');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
           <button class="danger ghost" type="submit">削除</button>
         </form>
       </article>
@@ -98,12 +99,12 @@
   {% if sessions %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>タスク</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
+        <thead><tr><th>タスク</th><th>内容</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
         <tbody>
           {% for s in sessions %}
           <tr>
-            <td>{{ s.task_name }}</td><td>{{ s.start_time }}</td><td>{{ s.end_time }}</td>
-            <td><strong>{{ s.duration_minutes }}分</strong></td>
+            <td>{{ s.task_name }}</td><td class="content-cell">{{ s.content or '--' }}</td><td>{{ s.start_time }}</td><td>{{ s.end_time }}</td>
+            <td><strong>{{ s.duration_minutes|minutes }}</strong></td>
             <td>
               <form method="post" action="{{ url_for('delete_session', session_id=s.id) }}" onsubmit="return confirm('この時間記録を削除しますか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
                 <button class="danger ghost compact" type="submit">削除</button>
@@ -118,6 +119,7 @@
     <div class="empty">本日の作業記録はまだありません。</div>
   {% endif %}
 </section>
+{% include "_week.html" %}
 <section class="card" id="notes">
   <div class="section-head"><div><h2>メモ</h2></div></div>
   <p>日付が変わっても残る共通メモです。編集後は保存してください。</p>

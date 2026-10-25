@@ -38,6 +38,19 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple
 label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; color: #566273; }
 input { width: 100%; border: 1px solid #ccd5df; background: #fff; border-radius: 9px; padding: 11px 12px; font: inherit; color: var(--text); }
 input:focus { outline: 2px solid rgba(31,94,255,.17); border-color: var(--accent); }
+textarea, select { width: 100%; border: 1px solid #ccd5df; background: #fff; border-radius: 9px; padding: 11px 12px; font: inherit; color: var(--text); }
+textarea { resize: vertical; line-height: 1.6; }
+textarea:focus, select:focus { outline: 2px solid rgba(31,94,255,.17); border-color: var(--accent); }
+.filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.filters label { min-width: 190px; }
+.filters a { padding: 10px; }
+.session-form label.session-content { flex: 1 1 240px; width: auto; }
+.task-main { min-width: 0; }
+td.content-cell { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 170px; max-width: 360px; }
+.history-day { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 12px; }
+#report-content { margin: 8px 0 12px; }
+.delete-report { margin-top: 12px; }
+.topbar nav { flex-wrap: wrap; }
 button { border: 1px solid #cad4df; background: #f8fafc; color: #253143; border-radius: 9px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
 button:hover { background: #eef3f8; }
 .primary { background: var(--accent); border-color: var(--accent); color: white; }

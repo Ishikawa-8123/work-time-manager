@@ -4,3 +4,5 @@ __pycache__/
 *.db
 *.db-journal
 !work_time.empty.db
+.test-runs/
+.preview/

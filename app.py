@@ -90,8 +90,21 @@ def init_db() -> None:
                 end_time TEXT,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                work_date TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
+        # 既存DBを保ったまま列を追加する。起動を繰り返してもデータは変更しない。
+        task_columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
+        if "deleted_at" not in task_columns:
+            db.execute("ALTER TABLE tasks ADD COLUMN deleted_at TEXT")
+        session_columns = {row["name"] for row in db.execute("PRAGMA table_info(task_sessions)")}
+        if "content" not in session_columns:
+            db.execute("ALTER TABLE task_sessions ADD COLUMN content TEXT NOT NULL DEFAULT ''")
         db.commit()
 
 
@@ -124,7 +137,45 @@ def format_minutes(total: int | None) -> str:
     if total is None:
         return "--"
     hours, mins = divmod(max(total, 0), 60)
-    return f"{hours}時間 {mins}分"
+    return f"{hours}時間 {mins}分（{max(total, 0)}分）"
+
+
+def selected_date(value: str | None) -> date:
+    if not value:
+        return today_jst()
+    try:
+        result = date.fromisoformat(value)
+        if result.isoformat() != value or not 1900 <= result.year <= 9998:
+            raise ValueError
+        return result
+    except ValueError:
+        abort(400, "日付をYYYY-MM-DD形式で指定してください（1900〜9998年）。")
+
+
+def weekly_summary(db: sqlite3.Connection, day: date) -> dict:
+    start = day - timedelta(days=day.weekday())
+    end = start + timedelta(days=6)
+    rows = db.execute("SELECT * FROM attendance WHERE work_date BETWEEN ? AND ?",
+                      (start.isoformat(), end.isoformat())).fetchall()
+    attendance_by_date = {row["work_date"]: row for row in rows}
+    task_minutes = dict(db.execute(
+        "SELECT work_date, SUM(duration_minutes) FROM task_sessions "
+        "WHERE work_date BETWEEN ? AND ? GROUP BY work_date",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall())
+    days = []
+    for offset in range(7):
+        work_date = (start + timedelta(days=offset)).isoformat()
+        summary = attendance_summary(attendance_by_date.get(work_date))
+        days.append({"date": work_date, "weekday": "月火水木金土日"[offset],
+                     "summary": summary, "task_minutes": task_minutes.get(work_date, 0)})
+    return {"start": start.isoformat(), "end": end.isoformat(), "days": days,
+            "gross": sum(item["summary"]["gross"] or 0 for item in days),
+            "break": sum(item["summary"]["break"] or 0 for item in days if item["summary"]["gross"] is not None),
+            "net": sum(item["summary"]["net"] or 0 for item in days),
+            "task_minutes": sum(task_minutes.values()),
+            "incomplete": sum(bool(row["start_time"] or row["end_time"] or row["break_start"] or row["break_end"])
+                              and attendance_summary(row)["gross"] is None for row in rows)}
 
 
 def attendance_summary(row: sqlite3.Row | None) -> dict[str, int | None | str]:
@@ -169,6 +220,7 @@ def index():
                 COALESCE(SUM(CASE WHEN s.work_date = ? THEN s.duration_minutes ELSE 0 END), 0) AS today_minutes
             FROM tasks t
             LEFT JOIN task_sessions s ON s.task_id = t.id
+            WHERE t.deleted_at IS NULL
             GROUP BY t.id, t.name, t.sort_order
             ORDER BY t.sort_order ASC, t.id ASC
             """,
@@ -177,7 +229,7 @@ def index():
 
         sessions = db.execute(
             """
-            SELECT s.id, s.start_time, s.end_time, s.duration_minutes, t.name AS task_name
+            SELECT s.id, s.start_time, s.end_time, s.duration_minutes, s.content, t.name AS task_name
             FROM task_sessions s
             JOIN tasks t ON t.id = s.task_id
             WHERE s.work_date = ?
@@ -190,6 +242,7 @@ def index():
             "SELECT COALESCE(SUM(duration_minutes), 0) FROM task_sessions WHERE work_date = ?",
             (today,),
         ).fetchone()[0]
+        week = weekly_summary(db, today_jst())
 
     return render_template(
         "index.html",
@@ -200,6 +253,7 @@ def index():
         sessions=sessions,
         total_task_minutes=total_task_minutes,
         note=note["content"] if note else "",
+        week=week,
     )
 
 
@@ -306,6 +360,9 @@ def add_task_session(task_id: int):
     start_time = request.form.get("start_time") or ""
     end_time = request.form.get("end_time") or ""
     duration = minutes_between(start_time, end_time)
+    content = (request.form.get("content") or "").strip()
+    if len(content) > 2000:
+        abort(400, "作業内容は2,000文字以内にしてください。")
 
     if duration is None:
         flash("開始時刻と終了時刻を正しく入力してください。", "error")
@@ -318,15 +375,15 @@ def add_task_session(task_id: int):
         return redirect(url_for("index"))
 
     with closing(get_db()) as db:
-        task = db.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        task = db.execute("SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL", (task_id,)).fetchone()
         if not task:
             flash("タスクが見つかりません。", "error")
             return redirect(url_for("index"))
 
         db.execute(
             """
-            INSERT INTO task_sessions(task_id, work_date, start_time, end_time, duration_minutes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO task_sessions(task_id, work_date, start_time, end_time, duration_minutes, created_at, content)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task_id,
@@ -335,20 +392,22 @@ def add_task_session(task_id: int):
                 end_time,
                 duration,
                 now_jst().isoformat(timespec="seconds"),
+                content,
             ),
         )
         db.commit()
 
-    flash(f"{duration}分の作業を記録しました。", "success")
+    flash(f"{format_minutes(duration)}の作業を記録しました。", "success")
     return redirect(url_for("index"))
 
 
 @app.post("/tasks/<int:task_id>/delete")
 def delete_task(task_id: int):
     with closing(get_db()) as db:
-        db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        db.execute("UPDATE tasks SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+                   (now_jst().isoformat(timespec="seconds"), task_id))
         db.commit()
-    flash("タスクを削除しました。", "success")
+    flash("タスクを入力一覧から削除しました。作業履歴は残しています。", "success")
     return redirect(url_for("index"))
 
 
@@ -358,31 +417,103 @@ def delete_session(session_id: int):
         db.execute("DELETE FROM task_sessions WHERE id = ?", (session_id,))
         db.commit()
     flash("時間記録を削除しました。", "success")
+    if request.form.get("return_to") == "history":
+        return redirect(url_for("history"))
     return redirect(url_for("index"))
 
 
 @app.get("/history")
 def history():
+    work_date = request.args.get("date", "")
+    if work_date:
+        selected_date(work_date)
+    task_id = request.args.get("task_id", "")
+    if task_id and (not task_id.isascii() or not task_id.isdigit() or len(task_id) > 18):
+        abort(400, "タスクの指定が正しくありません。")
+    conditions, params = [], []
+    if work_date:
+        conditions.append("s.work_date = ?")
+        params.append(work_date)
+    if task_id:
+        conditions.append("s.task_id = ?")
+        params.append(int(task_id))
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
     with closing(get_db()) as db:
         attendance_rows = db.execute(
-            "SELECT * FROM attendance ORDER BY work_date DESC LIMIT 90"
+            "SELECT * FROM attendance " + ("WHERE work_date = ? " if work_date else "")
+            + "ORDER BY work_date DESC", (work_date,) if work_date else ()
         ).fetchall()
+        tasks = db.execute("SELECT id, name, deleted_at FROM tasks ORDER BY name, id").fetchall()
         task_rows = db.execute(
-            """
-            SELECT s.work_date, t.name, s.start_time, s.end_time, s.duration_minutes
+            f"""
+            SELECT s.id, s.task_id, s.work_date, t.name, s.content, s.start_time, s.end_time, s.duration_minutes
             FROM task_sessions s
             JOIN tasks t ON t.id = s.task_id
+            {where}
             ORDER BY s.work_date DESC, s.start_time DESC
-            LIMIT 500
             """
+            , params
         ).fetchall()
 
     attendance_items = [
         {"row": row, "summary": attendance_summary(row)} for row in attendance_rows
     ]
-    return render_template(
-        "history.html", attendance_items=attendance_items, task_rows=task_rows
-    )
+    days, task_totals = {}, {}
+    for row in task_rows:
+        group = days.setdefault(row["work_date"], {"rows": [], "total": 0})
+        group["rows"].append(row)
+        group["total"] += row["duration_minutes"]
+        group = task_totals.setdefault(row["task_id"], {"name": row["name"], "total": 0, "dates": set()})
+        group["total"] += row["duration_minutes"]
+        group["dates"].add(row["work_date"])
+    return render_template("history.html", attendance_items=attendance_items,
+                           days=days, task_totals=task_totals, tasks=tasks,
+                           selected_task=task_id, selected_date=work_date,
+                           total_minutes=sum(row["duration_minutes"] for row in task_rows))
+
+
+@app.get("/reports")
+def reports():
+    day = selected_date(request.args.get("date"))
+    work_date = day.isoformat()
+    with closing(get_db()) as db:
+        attendance = db.execute("SELECT * FROM attendance WHERE work_date = ?", (work_date,)).fetchone()
+        rows = db.execute(
+            "SELECT t.id AS task_id, t.name, s.content, s.start_time, s.end_time, s.duration_minutes "
+            "FROM task_sessions s JOIN tasks t ON t.id = s.task_id "
+            "WHERE s.work_date = ? ORDER BY s.start_time, s.id", (work_date,)).fetchall()
+        report = db.execute("SELECT content FROM daily_reports WHERE work_date = ?", (work_date,)).fetchone()
+        week = weekly_summary(db, day)
+    totals = {}
+    for row in rows:
+        group = totals.setdefault(row["task_id"], {"name": row["name"], "minutes": 0})
+        group["minutes"] += row["duration_minutes"]
+    return render_template("reports.html", work_date=work_date, attendance=attendance,
+                           summary=attendance_summary(attendance), rows=rows, totals=totals,
+                           total_minutes=sum(row["duration_minutes"] for row in rows),
+                           report=report["content"] if report else "", week=week)
+
+
+@app.post("/reports")
+def save_report():
+    # 日付は画面で指定した日のまま保存。日をまたいでも別の日には保存しない。
+    if not request.form.get("work_date"):
+        abort(400, "日報の日付が必要です。")
+    work_date = selected_date(request.form["work_date"]).isoformat()
+    content = request.form.get("content", "")
+    if len(content) > 10000:
+        abort(400, "日報は10,000文字以内にしてください。")
+    with closing(get_db()) as db:
+        if request.form.get("action") == "delete":
+            db.execute("DELETE FROM daily_reports WHERE work_date = ?", (work_date,))
+            flash("日報の追記を削除しました。勤怠・作業履歴は残っています。", "success")
+        else:
+            db.execute("INSERT INTO daily_reports(work_date, content, updated_at) VALUES (?, ?, ?) "
+                       "ON CONFLICT(work_date) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+                       (work_date, content, now_jst().isoformat(timespec="seconds")))
+            flash("日報の追記を保存しました。", "success")
+        db.commit()
+    return redirect(url_for("reports", date=work_date))
 
 
 if __name__ == "__main__":

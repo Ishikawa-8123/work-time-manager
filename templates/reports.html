@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}日報・週集計 | 業務時間管理{% endblock %}
+{% block content %}
+<section class="hero compact-hero"><div><span class="eyebrow">DAILY REPORT</span><h2>日報・週集計</h2><p>勤怠とタスクの記録から日報を表示します。追記は日付ごとに保存できます。</p></div></section>
+<section class="card">
+  <form class="filters" method="get" action="{{ url_for('reports') }}">
+    <label>日付<input type="date" name="date" value="{{ work_date }}" required></label>
+    <button class="primary" type="submit">日報を表示</button>
+    <a href="{{ url_for('reports') }}">今日</a>
+  </form>
+</section>
+<section class="card">
+  <h2>{{ work_date }} の日報</h2>
+  <p>勤務：{{ attendance.start_time or '--' if attendance else '--' }} 〜 {{ attendance.end_time or '--' if attendance else '--' }} ／ 休憩：{{ attendance.break_start or '--' if attendance else '--' }} 〜 {{ attendance.break_end or '--' if attendance else '--' }}</p>
+  <div class="summary-row">
+    <div><span>拘束時間</span><b>{{ summary.gross|minutes }}</b></div>
+    <div><span>休憩時間</span><b>{{ summary.break|minutes }}</b></div>
+    <div><span>実働時間</span><b>{{ summary.net|minutes }}</b></div>
+  </div>
+  <h3>タスク別合計</h3>
+  {% for item in totals.values() %}<p>{{ item.name }}：{{ item.minutes|minutes }}</p>{% else %}<p>作業記録はありません。</p>{% endfor %}
+  <p><strong>タスク合計：{{ total_minutes|minutes }}</strong></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>タスク</th><th>内容</th><th>開始</th><th>終了</th><th>時間</th></tr></thead>
+    <tbody>{% for row in rows %}<tr><td>{{ row.name }}</td><td class="content-cell">{{ row.content or '--' }}</td><td>{{ row.start_time }}</td><td>{{ row.end_time }}</td><td>{{ row.duration_minutes|minutes }}</td></tr>
+    {% else %}<tr><td colspan="5">作業記録なし</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <h3>日報への追記</h3>
+  <form method="post" action="{{ url_for('save_report') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="work_date" value="{{ work_date }}">
+    <label for="report-content">成果・課題・申し送り（10,000文字まで）</label>
+    <textarea id="report-content" name="content" rows="6" maxlength="10000">{{ report }}</textarea>
+    <button class="primary" type="submit">日報の追記を保存</button>
+  </form>
+  {% if report %}<form class="delete-report" method="post" action="{{ url_for('save_report') }}" onsubmit="return confirm('この日の日報の追記を削除しますか？勤怠・タスク履歴は残ります。');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="work_date" value="{{ work_date }}"><input type="hidden" name="action" value="delete">
+    <button class="danger ghost" type="submit">日報の追記を削除</button>
+  </form>{% endif %}
+  <p>勤怠・タスク欄は元の記録の変更に合わせて更新されます。共通メモとは別に、この日付の追記として保存されます。</p>
+</section>
+{% include "_week.html" %}
+{% endblock %}
