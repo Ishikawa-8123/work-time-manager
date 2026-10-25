@@ -244,3 +244,107 @@ def test_all_duration_formats():
     assert app_module.format_minutes(0) == '0時間 0分（0分）'
     assert app_module.format_minutes(None) == '--'
 
+
+def test_calendar_month_week_day_and_archived_tasks(monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(app_module, 'today_jst', lambda: date(2026, 10, 25))
+    client = app_module.app.test_client()
+    post(client, '/tasks', data={'name': 'カレンダー用タスク'})
+    post(client, '/tasks/1/session', data={'start_time': '09:00', 'end_time': '11:30', 'content': '実施済み内容'})
+    post(client, '/tasks/1/delete')
+    post(client, '/events', data={'work_date': '2026-10-25', 'title': '予定の会議', 'start_time': '13:00', 'end_time': '14:00'})
+    month = client.get('/calendar?view=month&date=2026-10-25').get_data(as_text=True)
+    assert '予定の会議' in month
+    assert 'カレンダー用タスク' not in month and '実施済み内容' not in month
+    week = client.get('/calendar?view=week&date=2026-10-25').get_data(as_text=True)
+    assert '予定の会議' in week and 'カレンダー用タスク' in week and '実施済み内容' in week
+    assert '2時間 30分（150分）' in week
+    day = client.get('/calendar?view=day&date=2026-10-25').get_data(as_text=True)
+    assert '合計 2時間 30分（150分）' in day
+    assert 'カレンダー用タスク' not in client.get('/calendar?view=day&date=2026-10-24').get_data(as_text=True)
+    with app_module.get_db() as db:
+        assert db.execute('SELECT SUM(duration_minutes) FROM task_sessions').fetchone()[0] == 150
+        assert db.execute('SELECT count(*) FROM attendance').fetchone()[0] == 0
+
+
+def test_calendar_event_create_update_delete_persistence():
+    client = app_module.app.test_client()
+    post(client, '/events', data={'work_date': '2026-12-31', 'title': '終日予定<script>', 'content': '内容\n次の行'})
+    app_module.init_db()
+    text = client.get('/calendar?view=day&date=2026-12-31&edit_event=1').get_data(as_text=True)
+    assert '終日予定&lt;script&gt;' in text and '終日' in text and '次の行' in text
+    assert '予定を更新' in text
+    post(client, '/events/1', data={'work_date': '2027-01-01', 'title': '移動後の予定', 'start_time': '10:00', 'end_time': '11:00'})
+    assert '移動後の予定' in client.get('/calendar?view=month&date=2027-01-01').get_data(as_text=True)
+    assert '終日予定' not in client.get('/calendar?view=day&date=2026-12-31').get_data(as_text=True)
+    post(client, '/events/1/delete')
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM calendar_events').fetchone()[0] == 0
+    assert post(client, '/events/999/delete').status_code == 404
+    assert post(client, '/events/999', data={'work_date': '2027-01-01', 'title': 'なし'}).status_code == 404
+
+
+@pytest.mark.parametrize('values', [
+    {'work_date': 'bad', 'title': 'test'}, {'title': 'test'},
+    {'work_date': '2026-10-25', 'title': ''},
+    {'work_date': '2026-10-25', 'title': 'x' * 121},
+    {'work_date': '2026-10-25', 'title': 'test', 'content': 'x' * 2001},
+    {'work_date': '2026-10-25', 'title': 'test', 'start_time': '09:00'},
+    {'work_date': '2026-10-25', 'title': 'test', 'start_time': '9:0', 'end_time': '10:00'},
+    {'work_date': '2026-10-25', 'title': 'test', 'start_time': '23:00', 'end_time': '01:00'},
+    {'work_date': '2026-10-25', 'title': 'test', 'start_time': '09:00', 'end_time': '09:00'},
+])
+def test_calendar_event_validation(values):
+    client = app_module.app.test_client()
+    assert post(client, '/events', data=values).status_code == 400
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM calendar_events').fetchone()[0] == 0
+
+
+def test_calendar_csrf_and_query_validation():
+    client = app_module.app.test_client()
+    assert client.post('/events', data={'work_date': '2026-10-25', 'title': 'なし'}).status_code == 400
+    assert client.get('/calendar?view=other').status_code == 400
+    assert client.get('/calendar?date=2026-02-30').status_code == 400
+    assert client.get('/calendar?edit_event=oops').status_code == 400
+    assert client.get('/calendar?edit_event=9999999999999999999999').status_code == 400
+    assert client.get('/calendar?edit_event=999').status_code == 404
+
+
+def test_overtime_separates_weekdays_weekends_and_months():
+    from datetime import date
+    with app_module.get_db() as db:
+        for work_date, start, end, bs, be in [
+            ('2026-10-19', '09:00', '19:00', '12:00', '13:00'),  # 実働9h、残業1h
+            ('2026-10-20', '09:00', '17:00', '12:00', '13:00'),  # 実働7h、残業0h（相殺しない）
+            ('2026-10-21', '09:00', None, None, None),          # 未完了を除外
+            ('2026-10-24', '09:00', '12:00', None, None),      # 土曜3h
+            ('2026-10-25', '13:00', '15:30', None, None),      # 日曜2.5h
+            ('2026-10-31', '22:00', '01:00', None, None),      # 月末土曜、開始日に3h
+            ('2026-11-01', '09:00', '11:00', None, None),      # 翌月日曜2h
+        ]:
+            db.execute('INSERT INTO attendance(work_date,start_time,end_time,break_start,break_end,updated_at) VALUES (?,?,?,?,?,?)',
+                       (work_date, start, end, bs, be, 'test'))
+        db.commit()
+        week = app_module.weekly_summary(db, date(2026, 10, 25))
+        month = app_module.monthly_overtime(db, date(2026, 10, 25))
+        next_month = app_module.monthly_overtime(db, date(2026, 11, 1))
+    assert week['weekday_overtime'] == 60
+    assert week['weekend_overtime'] == 330
+    assert week['overtime'] == 390 and week['incomplete'] == 1
+    assert month['weekday_overtime'] == 60 and month['weekend_overtime'] == 510
+    assert month['overtime'] == 570 and month['incomplete'] == 1
+    assert next_month['weekday_overtime'] == 0 and next_month['weekend_overtime'] == 120
+    page = app_module.app.test_client().get('/reports?date=2026-10-25').get_data(as_text=True)
+    assert '2026-10 の残業時間' in page and '＋8時間 30分（510分）' in page
+    assert page.index('id="monthly-overtime"') > page.index('一週間の業務時間')
+
+
+def test_calendar_week_crosses_year_and_month_layout():
+    client = app_module.app.test_client()
+    page = client.get('/calendar?view=week&date=2027-01-01').get_data(as_text=True)
+    assert '2026-12-28' in page and '2027-01-03' in page
+    for view in ['month', 'week', 'day']:
+        assert client.get(f'/calendar?view={view}&date=1900-01-01').status_code == 200
+        assert client.get(f'/calendar?view={view}&date=9998-12-31').status_code == 200
+

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}カレンダー | 業務時間管理{% endblock %}
+{% block content %}
+<section class="hero compact-hero"><div><span class="eyebrow">CALENDAR</span><h2>カレンダー</h2><p>予定と実施済みのタスクを分けて確認できます。予定は作業時間には加算されません。</p></div></section>
+<section class="card">
+  <div class="calendar-toolbar">
+    <div class="view-links">
+      {% for mode, label in [('month','月'),('week','週'),('day','日')] %}<a class="view-link {% if view == mode %}active{% endif %}" href="{{ url_for('calendar_view', view=mode, date=selected_day) }}" {% if view == mode %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    </div>
+    <div class="calendar-nav">{% if previous %}<a href="{{ url_for('calendar_view', view=view, date=previous) }}">前へ</a>{% endif %}<strong>{{ title }}</strong>{% if following %}<a href="{{ url_for('calendar_view', view=view, date=following) }}">次へ</a>{% endif %}</div>
+    <a href="{{ url_for('calendar_view', view=view) }}">今日</a><a href="#event-editor">予定を追加</a>
+  </div>
+  <form class="filters calendar-date" method="get" action="{{ url_for('calendar_view') }}">
+    <input type="hidden" name="view" value="{{ view }}"><label>表示する日付<input type="date" name="date" value="{{ selected_day }}" required></label><button type="submit">移動</button>
+  </form>
+  {% if view == 'month' %}<p>月表示は予定のみです。日付を押すとその日の予定とタスク時間を確認できます。</p>
+  {% elif view == 'week' %}<p>月曜〜日曜の実施済みタスクと作業内容を表示します。削除済みタスクの履歴も含まれます。</p>
+  {% else %}<p><a href="{{ url_for('reports', date=selected_day) }}">この日の日報・週集計を開く</a></p>{% endif %}
+
+  <div class="calendar-scroll"><div class="calendar-grid calendar-{{ view }}">
+    {% if view != 'day' %}{% for label in '月火水木金土日' %}<div class="calendar-weekday">{{ label }}</div>{% endfor %}{% endif %}
+    {% for item in days %}
+    <section class="calendar-cell {% if not item.in_month and view == 'month' %}other-month{% endif %} {% if item.today %}is-today{% endif %}">
+      <h3><a href="{{ url_for('calendar_view', view='day', date=item.date) }}">{% if view == 'month' %}{{ item.number }}{% else %}{{ item.date[5:] }}（{{ item.weekday }}）{% endif %}</a>{% if item.today %}<small>今日</small>{% endif %}</h3>
+      <h4>予定</h4>
+      {% for event in item.events %}
+      <article class="calendar-event">
+        <span class="calendar-time">{% if event.start_time %}{{ event.start_time }}〜{{ event.end_time }}{% else %}終日{% endif %}</span>
+        <a href="{{ url_for('calendar_view', view='day', date=event.work_date, edit_event=event.id) }}#event-editor">{{ event.title }}</a>
+        {% if view == 'day' and event.content %}<p class="preserve-lines">{{ event.content }}</p>{% endif %}
+        {% if view == 'day' %}<form method="post" action="{{ url_for('delete_event', event_id=event.id) }}" onsubmit="return confirm('この予定を削除しますか？作業記録は変更されません。');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger ghost compact" type="submit">予定を削除</button></form>{% endif %}
+      </article>
+      {% else %}<p class="calendar-empty">予定なし</p>{% endfor %}
+      {% if view != 'month' %}
+      <h4>実施済みタスク</h4>
+      <p class="calendar-total">合計 {{ item.task_minutes|minutes }}</p>
+      {% for task in item.tasks %}<article class="calendar-task">
+        <span class="calendar-time">{{ task.start_time }}〜{{ task.end_time }}</span>
+        <a href="{{ url_for('history', task_id=task.task_id, date=item.date) }}">{{ task.name }}</a>
+        {% if task.content %}<p class="preserve-lines {% if view == 'week' %}brief-content{% endif %}" title="{{ task.content }}">{{ task.content }}</p>{% endif %}
+        <span class="task-duration">{{ task.duration_minutes|minutes }}</span>
+      </article>{% else %}<p class="calendar-empty">作業記録なし</p>{% endfor %}
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div></div>
+</section>
+
+{% if view != 'month' %}<section class="card">
+  <h2>{{ '今表示している週' if view == 'week' else 'この日' }}のタスク別合計</h2>
+  {% for item in task_totals.values() %}<p>{{ item.name }}：{{ item.minutes|minutes }}</p>{% else %}<p>作業記録はありません。</p>{% endfor %}
+  <strong>合計 {{ total_minutes|minutes }}</strong>
+</section>{% endif %}
+
+<section class="card" id="event-editor">
+  <h2>{{ '予定を編集' if edit_event else '予定を追加' }}</h2>
+  <p>タスクとは別に保存します。時刻が不要な予定は、開始・終了を両方空欄にしてください。</p>
+  <form method="post" action="{{ url_for('update_event', event_id=edit_event.id) if edit_event else url_for('add_event') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="filters">
+      <label>日付<input type="date" name="work_date" value="{{ edit_event.work_date if edit_event else selected_day }}" required></label>
+      <label>開始（任意）<input type="time" name="start_time" value="{{ edit_event.start_time or '' if edit_event else '' }}"></label>
+      <label>終了（任意）<input type="time" name="end_time" value="{{ edit_event.end_time or '' if edit_event else '' }}"></label>
+    </div>
+    <label class="event-field">予定名（120文字まで）<input name="title" maxlength="120" value="{{ edit_event.title if edit_event else '' }}" placeholder="例：来週の打ち合わせ" required></label>
+    <label class="event-field">予定の内容（任意・2,000文字まで）<textarea name="content" rows="3" maxlength="2000">{{ edit_event.content if edit_event else '' }}</textarea></label>
+    <button class="primary" type="submit">{{ '予定を更新' if edit_event else '予定を保存' }}</button>
+    {% if edit_event %}<a class="cancel-event" href="{{ url_for('calendar_view', view='day', date=selected_day) }}#event-editor">編集をやめる</a>{% endif %}
+  </form>
+</section>
+{% endblock %}

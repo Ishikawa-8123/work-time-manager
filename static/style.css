@@ -50,6 +50,39 @@ td.content-cell { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 170
 .history-day { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 12px; }
 #report-content { margin: 8px 0 12px; }
 .delete-report { margin-top: 12px; }
+.calendar-toolbar, .calendar-nav, .view-links { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.calendar-toolbar { justify-content: space-between; }
+.view-links { gap: 4px; }
+.view-link { padding: 9px 16px; background: #f0f4fa; border-radius: 8px; text-decoration: none; color: #253143; }
+.view-link.active { background: var(--accent); color: white; }
+.calendar-date { margin-top: 20px; }
+.calendar-scroll { overflow-x: auto; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.calendar-month { min-width: 840px; }
+.calendar-week { min-width: 770px; }
+.calendar-day { grid-template-columns: 1fr; }
+.calendar-weekday { text-align: center; padding: 10px; background: #f1f5fb; font-weight: 700; }
+.calendar-cell { min-width: 0; padding: 10px; background: white; }
+.calendar-month .calendar-cell { min-height: 130px; }
+.calendar-cell.other-month { background: #f6f8fb; }
+.calendar-cell.is-today { box-shadow: inset 0 0 0 2px var(--accent); }
+.calendar-cell h3 { font-size: 14px; margin: 0 0 12px; }
+.calendar-cell h3 small { margin-left: 8px; font-size: 10px; color: var(--accent); }
+.calendar-cell h4 { font-size: 11px; color: var(--muted); margin: 16px 0 6px; }
+.calendar-event, .calendar-task { margin: 7px 0; padding: 9px; border-radius: 6px; overflow-wrap: anywhere; }
+.calendar-event { background: #edf3ff; border-left: 3px solid #5686ef; }
+.calendar-task { background: #eef8f2; border-left: 3px solid #39946b; }
+.calendar-event a, .calendar-task a { font-size: 13px; font-weight: 700; }
+.calendar-time, .task-duration { display: block; font-size: 11px; margin: 3px 0; }
+.calendar-empty { color: var(--muted); font-size: 12px; }
+.calendar-total { font-size: 12px; font-weight: 700; }
+.preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.brief-content { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.event-field { margin: 16px 0; }
+.cancel-event { margin-left: 12px; }
+.overtime-summary > div:nth-child(2) { background: #fff4e5; }
+details { margin-top: 20px; }
+summary { cursor: pointer; }
 .topbar nav { flex-wrap: wrap; }
 button { border: 1px solid #cad4df; background: #f8fafc; color: #253143; border-radius: 9px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
 button:hover { background: #eef3f8; }

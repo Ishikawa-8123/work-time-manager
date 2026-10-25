@@ -13,4 +13,11 @@
     {% endfor %}</tbody>
     <tfoot><tr><th>合計</th><td>{{ week.gross|minutes }}</td><td>{{ week.break|minutes }}</td><td>{{ week.net|minutes }}</td><td>{{ week.task_minutes|minutes }}</td></tr></tfoot>
   </table></div>
+  <div class="summary-row overtime-summary">
+    <div><span>平日の残業（1日8時間超）</span><b>{{ week.weekday_overtime|minutes }}</b></div>
+    <div><span>土日の残業（実働全時間）</span><b>＋{{ week.weekend_overtime|minutes }}</b></div>
+    <div><span>週の残業合計</span><b>{{ week.overtime|minutes }}</b></div>
+  </div>
+  <p>定常は月〜金の1日8時間、5日で40時間（2400分）です。各日の実働が8時間を超えた分を合計し、8時間未満の日との相殺はしません。土日は別枠で全実働を加算します。</p>
+  <p><a href="{{ url_for('calendar_view', view='week', date=week.start) }}">この週のタスクをカレンダーで見る</a></p>
 </section>
