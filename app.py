@@ -68,6 +68,12 @@ def init_db() -> None:
                 content TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS daily_notes (
+                work_date TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS task_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id INTEGER NOT NULL,
@@ -268,7 +274,6 @@ def signed_minutes_filter(value: int | None) -> str:
 def index():
     today = today_jst().isoformat()
     with closing(get_db()) as db:
-        note = db.execute("SELECT content FROM notes WHERE id = 1").fetchone()
         attendance = db.execute(
             "SELECT * FROM attendance WHERE work_date = ?", (today,)
         ).fetchone()
@@ -290,11 +295,12 @@ def index():
 
         sessions = db.execute(
             """
-            SELECT s.id, s.start_time, s.end_time, s.duration_minutes, s.content, t.name AS task_name
+            SELECT s.id, s.task_id, s.start_time, s.end_time, s.duration_minutes,
+                   s.content, t.name AS task_name
             FROM task_sessions s
             JOIN tasks t ON t.id = s.task_id
             WHERE s.work_date = ?
-            ORDER BY s.start_time DESC, s.id DESC
+            ORDER BY t.sort_order, t.id, s.start_time, s.id
             """,
             (today,),
         ).fetchall()
@@ -305,6 +311,15 @@ def index():
         ).fetchone()[0]
         week = weekly_summary(db, today_jst())
 
+    session_groups = []
+    for work_session in sessions:
+        if not session_groups or session_groups[-1]["task_id"] != work_session["task_id"]:
+            session_groups.append({"task_id": work_session["task_id"],
+                                   "task_name": work_session["task_name"],
+                                   "sessions": [], "minutes": 0})
+        session_groups[-1]["sessions"].append(work_session)
+        session_groups[-1]["minutes"] += work_session["duration_minutes"]
+
     return render_template(
         "index.html",
         today=today,
@@ -312,8 +327,8 @@ def index():
         attendance_summary=attendance_summary(attendance),
         tasks=tasks,
         sessions=sessions,
+        session_groups=session_groups,
         total_task_minutes=total_task_minutes,
-        note=note["content"] if note else "",
         week=week,
     )
 
@@ -321,6 +336,7 @@ def index():
 @app.post("/notes")
 def save_note():
     content = request.form.get("content", "")
+    work_date = selected_date(request.form.get("work_date"))
     if len(content) > 10000:
         return "メモは10,000文字以内にしてください。戻って内容を短くしてください。", 400
     with closing(get_db()) as db:
@@ -330,7 +346,38 @@ def save_note():
         )
         db.commit()
     flash("メモを保存しました。", "success")
-    return redirect(url_for("index") + "#notes")
+    return redirect(url_for("notes_page", date=work_date.isoformat()) + "#common-note")
+
+
+@app.get("/notes")
+def notes_page():
+    work_date = selected_date(request.args.get("date"))
+    with closing(get_db()) as db:
+        common = db.execute("SELECT content FROM notes WHERE id = 1").fetchone()
+        daily = db.execute("SELECT content FROM daily_notes WHERE work_date = ?",
+                           (work_date.isoformat(),)).fetchone()
+    return render_template("notes.html", work_date=work_date.isoformat(),
+                           common_note=common["content"] if common else "",
+                           daily_note=daily["content"] if daily else "")
+
+
+@app.post("/notes/daily")
+def save_daily_note():
+    if not request.form.get("work_date"):
+        abort(400, "日付を指定してください。")
+    work_date = selected_date(request.form["work_date"])
+    content = request.form.get("content", "")
+    if len(content) > 10000:
+        abort(400, "その日のメモは10,000文字以内にしてください。")
+    with closing(get_db()) as db:
+        db.execute(
+            "INSERT INTO daily_notes(work_date, content, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(work_date) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+            (work_date.isoformat(), content, now_jst().isoformat(timespec="seconds")),
+        )
+        db.commit()
+    flash("その日のメモを保存しました。", "success")
+    return redirect(url_for("notes_page", date=work_date.isoformat()) + "#daily-note")
 
 
 @app.post("/attendance")
@@ -470,6 +517,50 @@ def delete_task(task_id: int):
         db.commit()
     flash("タスクを入力一覧から削除しました。作業履歴は残しています。", "success")
     return redirect(url_for("index"))
+
+
+@app.post("/tasks/<int:task_id>/rename")
+def rename_task(task_id: int):
+    name = (request.form.get("name") or "").strip()
+    if not name or len(name) > 120:
+        abort(400, "タスク名は1〜120文字で入力してください。")
+    with closing(get_db()) as db:
+        result = db.execute("UPDATE tasks SET name = ? WHERE id = ? AND deleted_at IS NULL",
+                            (name, task_id))
+        if result.rowcount == 0:
+            abort(404)
+        db.commit()
+    flash("タスク名を変更しました。", "success")
+    return redirect(url_for("index") + "#tasks")
+
+
+@app.post("/sessions/<int:session_id>/edit")
+def edit_session(session_id: int):
+    start_time = request.form.get("start_time") or ""
+    end_time = request.form.get("end_time") or ""
+    duration = minutes_between(start_time, end_time)
+    content = (request.form.get("content") or "").strip()
+    if duration is None or not 0 < duration <= 24 * 60 or len(content) > 2000:
+        abort(400, "作業内容・開始時刻・終了時刻を確認してください。")
+    try:
+        task_id = int(request.form.get("task_id", ""))
+    except ValueError:
+        abort(400, "タスクを選択してください。")
+    with closing(get_db()) as db:
+        work_session = db.execute("SELECT task_id FROM task_sessions WHERE id = ? AND work_date = ?",
+                                  (session_id, today_jst().isoformat())).fetchone()
+        if not work_session:
+            abort(404)
+        task = db.execute("SELECT id FROM tasks WHERE id = ? AND (deleted_at IS NULL OR id = ?)",
+                          (task_id, work_session["task_id"])).fetchone()
+        if not task:
+            abort(400, "選択したタスクは利用できません。")
+        db.execute("UPDATE task_sessions SET task_id = ?, start_time = ?, end_time = ?, "
+                   "duration_minutes = ?, content = ? WHERE id = ?",
+                   (task_id, start_time, end_time, duration, content, session_id))
+        db.commit()
+    flash("作業ログを更新しました。", "success")
+    return redirect(url_for("index") + "#today-log")
 
 
 @app.post("/sessions/<int:session_id>/delete")

@@ -43,7 +43,7 @@ def test_note_persists_across_days_and_can_be_cleared(monkeypatch):
     post(client, "/notes", data={"content": note})
     app_module.init_db()
     monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 20))
-    text = app_module.app.test_client().get("/").get_data(as_text=True)
+    text = app_module.app.test_client().get("/notes").get_data(as_text=True)
     assert "申し送り" in text
     assert "&lt;script&gt;" in text
     assert post(client, "/notes", data={"content": "a" * 10001}).status_code == 400
@@ -52,6 +52,44 @@ def test_note_persists_across_days_and_can_be_cleared(monkeypatch):
     post(client, "/notes", data={"content": ""})
     with app_module.get_db() as db:
         assert db.execute("SELECT content FROM notes").fetchone()[0] == ""
+
+
+def test_daily_note_is_separate_from_persistent_note(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 28))
+    post(client, "/notes", data={"content": "継続するメモ"})
+    post(client, "/notes/daily", data={"work_date": "2026-10-28", "content": "今日だけのメモ"})
+    assert "今日だけのメモ" in client.get("/notes?date=2026-10-28").get_data(as_text=True)
+    other_day = client.get("/notes?date=2026-10-29").get_data(as_text=True)
+    assert "継続するメモ" in other_day
+    assert "今日だけのメモ" not in other_day
+    assert post(client, "/notes/daily", data={"work_date": "2026-10-29", "content": "a" * 10001}).status_code == 400
+    with app_module.get_db() as db:
+        assert db.execute("SELECT count(*) FROM daily_notes").fetchone()[0] == 1
+
+
+def test_rename_task_and_edit_today_log_recalculates_group_totals(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 28))
+    post(client, "/tasks", data={"name": "定常業務"})
+    post(client, "/tasks", data={"name": "別の作業"})
+    post(client, "/tasks/1/session", data={"content": "メール確認", "start_time": "11:00", "end_time": "11:20"})
+    post(client, "/tasks/1/session", data={"content": "日報作成", "start_time": "15:00", "end_time": "15:10"})
+    page = client.get("/").get_data(as_text=True)
+    assert "定常業務 の合計" in page and "0時間 30分（30分）" in page
+    assert post(client, "/tasks/1/rename", data={"name": "定常作業"}).status_code == 302
+    assert post(client, "/sessions/1/edit", data={"task_id": "2", "content": "連絡対応",
+                "start_time": "11:00", "end_time": "11:15"}).status_code == 302
+    page = client.get("/").get_data(as_text=True)
+    assert "定常作業 の合計" in page and "0時間 10分（10分）" in page
+    assert "別の作業 の合計" in page and "0時間 15分（15分）" in page
+    with app_module.get_db() as db:
+        assert db.execute("SELECT task_id, content, duration_minutes FROM task_sessions WHERE id = 1").fetchone()[:] == (2, "連絡対応", 15)
+    assert post(client, "/sessions/1/edit", data={"task_id": "2", "start_time": "11:00", "end_time": "11:00"}).status_code == 400
+    monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 29))
+    assert post(client, "/sessions/1/edit", data={"task_id": "2", "start_time": "11:00", "end_time": "11:20"}).status_code == 404
 
 
 def test_day_rollover_and_persistence(monkeypatch):

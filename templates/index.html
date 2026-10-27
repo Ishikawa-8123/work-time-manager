@@ -48,7 +48,7 @@
   </div>
 </section>
 
-<section class="card">
+<section class="card" id="tasks">
   <div class="section-head">
     <div>
       <span class="eyebrow">TASKS</span>
@@ -70,6 +70,13 @@
             <h3>{{ task.name }}</h3>
             <span class="pill">今日 {{ task.today_minutes|minutes }}</span>
           </div>
+          <details class="inline-edit"><summary>タスク名を変更</summary>
+            <form method="post" action="{{ url_for('rename_task', task_id=task.id) }}" class="rename-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label>タスク名 <input name="name" value="{{ task.name }}" maxlength="120" required></label>
+              <button type="submit">変更</button>
+            </form>
+          </details>
           <form class="session-form" method="post" action="{{ url_for('add_task_session', task_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
             <label>開始 <input type="time" name="start_time" required></label>
             <span class="arrow">→</span>
@@ -89,7 +96,7 @@
   {% endif %}
 </section>
 
-<section class="card">
+<section class="card" id="today-log">
   <div class="section-head">
     <div>
       <span class="eyebrow">TODAY LOG</span>
@@ -101,16 +108,32 @@
       <table>
         <thead><tr><th>タスク</th><th>内容</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
         <tbody>
-          {% for s in sessions %}
+          {% for group in session_groups %}
+          {% for s in group.sessions %}
           <tr>
             <td>{{ s.task_name }}</td><td class="content-cell">{{ s.content or '--' }}</td><td>{{ s.start_time }}</td><td>{{ s.end_time }}</td>
             <td><strong>{{ s.duration_minutes|minutes }}</strong></td>
             <td>
+              <details class="log-edit"><summary>編集</summary>
+                <form method="post" action="{{ url_for('edit_session', session_id=s.id) }}" class="log-edit-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <label>タスク <select name="task_id" required>
+                    {% for task in tasks %}<option value="{{ task.id }}" {% if task.id == s.task_id %}selected{% endif %}>{{ task.name }}</option>{% endfor %}
+                    {% if not tasks|selectattr('id', 'equalto', s.task_id)|list %}<option value="{{ s.task_id }}" selected>{{ s.task_name }}（一覧から削除済み）</option>{% endif %}
+                  </select></label>
+                  <label>内容 <textarea name="content" rows="2" maxlength="2000">{{ s.content }}</textarea></label>
+                  <label>開始 <input type="time" name="start_time" value="{{ s.start_time }}" required></label>
+                  <label>終了 <input type="time" name="end_time" value="{{ s.end_time }}" required></label>
+                  <button type="submit">変更を保存</button>
+                </form>
+              </details>
               <form method="post" action="{{ url_for('delete_session', session_id=s.id) }}" onsubmit="return confirm('この時間記録を削除しますか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
                 <button class="danger ghost compact" type="submit">削除</button>
               </form>
             </td>
           </tr>
+          {% endfor %}
+          <tr class="task-subtotal"><th colspan="4">{{ group.task_name }} の合計</th><td><strong>{{ group.minutes|minutes }}</strong></td><td></td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -120,15 +143,5 @@
   {% endif %}
 </section>
 {% include "_week.html" %}
-<section class="card" id="notes">
-  <div class="section-head"><div><h2>メモ</h2></div></div>
-  <p>日付が変わっても残る共通メモです。編集後は保存してください。</p>
-  <form method="post" action="{{ url_for('save_note') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="note-content">メモ内容（10,000文字まで）</label>
-    <textarea id="note-content" name="content" rows="7" maxlength="10000" placeholder="申し送りや、忘れずに対応したいことなど">{{ note }}</textarea>
-    <button class="primary" type="submit">メモを保存</button>
-  </form>
-</section>
 {% endblock %}
 

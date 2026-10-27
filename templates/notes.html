@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}メモ | 業務時間管理{% endblock %}
+{% block content %}
+<section class="hero compact-hero"><div><span class="eyebrow">NOTES</span><h2>メモ</h2><p>日付別のメモと、翌日以降も残る共通メモを保存できます。</p></div></section>
+<section class="card" id="daily-note">
+  <div class="section-head"><div><h2>その日のメモ</h2><p>選択した日付に保存します。別の日付には引き継がれません。</p></div></div>
+  <form method="get" action="{{ url_for('notes_page') }}" class="filters">
+    <label>日付 <input type="date" name="date" value="{{ work_date }}" required></label>
+    <button type="submit">表示</button>
+    <a href="{{ url_for('notes_page') }}">今日へ戻る</a>
+  </form>
+  <form method="post" action="{{ url_for('save_daily_note') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="work_date" value="{{ work_date }}">
+    <label for="daily-note-content">{{ work_date }} のメモ（10,000文字まで）</label>
+    <textarea id="daily-note-content" name="content" rows="7" maxlength="10000" placeholder="今日の申し送りや覚え書き">{{ daily_note }}</textarea>
+    <button class="primary" type="submit">その日のメモを保存</button>
+  </form>
+</section>
+<section class="card" id="common-note">
+  <div class="section-head"><div><h2>共通メモ</h2><p>日付が変わっても残り、どの日付を表示していても同じ内容です。</p></div></div>
+  <form method="post" action="{{ url_for('save_note') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="work_date" value="{{ work_date }}">
+    <label for="note-content">共通メモ（10,000文字まで）</label>
+    <textarea id="note-content" name="content" rows="7" maxlength="10000" placeholder="明日以降も残したい申し送りなど">{{ common_note }}</textarea>
+    <button class="primary" type="submit">共通メモを保存</button>
+  </form>
+</section>
+{% endblock %}
