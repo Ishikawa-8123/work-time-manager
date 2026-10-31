@@ -176,6 +176,20 @@ def selected_date(value: str | None) -> date:
         abort(400, "日付をYYYY-MM-DD形式で指定してください（1900〜9998年）。")
 
 
+def period_task_totals(db: sqlite3.Connection, start: date, end: date) -> list[dict]:
+    rows = db.execute(
+        "SELECT t.id, t.name, SUM(s.duration_minutes) AS minutes "
+        "FROM task_sessions s JOIN tasks t ON t.id = s.task_id "
+        "WHERE s.work_date BETWEEN ? AND ? GROUP BY t.id, t.name "
+        "ORDER BY minutes DESC, t.sort_order, t.id",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+    total = sum(row["minutes"] for row in rows)
+    return [{"id": row["id"], "name": row["name"], "minutes": row["minutes"],
+             "percent": round(row["minutes"] * 100 / total, 1) if total else 0}
+            for row in rows]
+
+
 def weekly_summary(db: sqlite3.Connection, day: date) -> dict:
     start = day - timedelta(days=day.weekday())
     end = start + timedelta(days=6)
@@ -198,6 +212,7 @@ def weekly_summary(db: sqlite3.Connection, day: date) -> dict:
     weekday_overtime = max(weekday_balance, 0)
     weekend_overtime = sum(item["weekend_overtime"] for item in days)
     return {"start": start.isoformat(), "end": end.isoformat(), "days": days,
+            "task_totals": period_task_totals(db, start, end),
             "gross": sum(item["summary"]["gross"] or 0 for item in days),
             "break": sum(item["summary"]["break"] or 0 for item in days if item["summary"]["gross"] is not None),
             "net": sum(item["summary"]["net"] or 0 for item in days),
@@ -233,6 +248,7 @@ def monthly_overtime(db: sqlite3.Connection, day: date) -> dict:
     weekday_overtime = max(weekday_balance, 0)
     weekend_overtime = sum(item["weekend_overtime"] for item in days)
     return {"month": start.strftime('%Y-%m'), "days": days,
+            "task_totals": period_task_totals(db, start, end),
             "weekday_balance": weekday_balance,
             "weekday_overtime": weekday_overtime,
             "weekend_overtime": weekend_overtime,
@@ -534,6 +550,28 @@ def rename_task(task_id: int):
     return redirect(url_for("index") + "#tasks")
 
 
+@app.post("/tasks/<int:task_id>/move")
+def move_task(task_id: int):
+    direction = request.form.get("direction")
+    if direction not in {"up", "down"}:
+        abort(400, "移動方向が正しくありません。")
+    with closing(get_db()) as db:
+        active_ids = [row["id"] for row in db.execute(
+            "SELECT id FROM tasks WHERE deleted_at IS NULL ORDER BY sort_order, id")]
+        if task_id not in active_ids:
+            abort(404)
+        index = active_ids.index(task_id)
+        other = index + (-1 if direction == "up" else 1)
+        if not 0 <= other < len(active_ids):
+            abort(400, "これ以上移動できません。")
+        active_ids[index], active_ids[other] = active_ids[other], active_ids[index]
+        for position, current_id in enumerate(active_ids, 1):
+            db.execute("UPDATE tasks SET sort_order = ? WHERE id = ?", (position, current_id))
+        db.commit()
+    flash("タスクの順番を変更しました。", "success")
+    return redirect(url_for("index") + "#tasks")
+
+
 @app.post("/sessions/<int:session_id>/edit")
 def edit_session(session_id: int):
     start_time = request.form.get("start_time") or ""
@@ -546,9 +584,10 @@ def edit_session(session_id: int):
         task_id = int(request.form.get("task_id", ""))
     except ValueError:
         abort(400, "タスクを選択してください。")
+    work_date = selected_date(request.form.get("work_date")).isoformat()
     with closing(get_db()) as db:
         work_session = db.execute("SELECT task_id FROM task_sessions WHERE id = ? AND work_date = ?",
-                                  (session_id, today_jst().isoformat())).fetchone()
+                                  (session_id, work_date)).fetchone()
         if not work_session:
             abort(404)
         task = db.execute("SELECT id FROM tasks WHERE id = ? AND (deleted_at IS NULL OR id = ?)",
@@ -560,6 +599,8 @@ def edit_session(session_id: int):
                    (task_id, start_time, end_time, duration, content, session_id))
         db.commit()
     flash("作業ログを更新しました。", "success")
+    if request.form.get("return_to") == "history":
+        return redirect(url_for("history", date=work_date) + "#task-history")
     return redirect(url_for("index") + "#today-log")
 
 

@@ -92,6 +92,71 @@ def test_rename_task_and_edit_today_log_recalculates_group_totals(monkeypatch):
     assert post(client, "/sessions/1/edit", data={"task_id": "2", "start_time": "11:00", "end_time": "11:20"}).status_code == 404
 
 
+def test_edit_past_session_from_history_updates_period_totals(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    post(client, "/tasks", data={"name": "定常業務"})
+    post(client, "/tasks", data={"name": "報告書"})
+    monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 19))
+    post(client, "/tasks/1/session", data={"content": "メール", "start_time": "11:00", "end_time": "11:20"})
+    monkeypatch.setattr(app_module, "today_jst", lambda: date(2026, 10, 31))
+    history = client.get("/history?date=2026-10-19").get_data(as_text=True)
+    assert '/sessions/1/edit' in history and 'value="2026-10-19"' in history
+    response = post(client, "/sessions/1/edit", data={"work_date": "2026-10-19", "return_to": "history",
+                    "task_id": "2", "content": "月次報告", "start_time": "10:00", "end_time": "11:30"})
+    assert response.status_code == 302 and '/history?date=2026-10-19' in response.headers['Location']
+    with app_module.get_db() as db:
+        row = db.execute("SELECT task_id, work_date, content, duration_minutes FROM task_sessions WHERE id = 1").fetchone()
+        week = app_module.weekly_summary(db, date(2026, 10, 19))
+        month = app_module.monthly_overtime(db, date(2026, 10, 19))
+    assert row[:] == (2, "2026-10-19", "月次報告", 90)
+    assert [(item['name'], item['minutes']) for item in week['task_totals']] == [('報告書', 90)]
+    assert [(item['name'], item['minutes']) for item in month['task_totals']] == [('報告書', 90)]
+    assert post(client, "/sessions/1/edit", data={"work_date": "2026-10-20", "task_id": "2",
+                "start_time": "10:00", "end_time": "11:30"}).status_code == 404
+    page = client.get('/reports?date=2026-10-19').get_data(as_text=True)
+    assert '2026-10 のタスク別時間' in page and '1時間 30分（90分）' in page
+    assert '勤怠の開始〜終了から休憩を引いた実働' in page
+
+
+def test_task_order_can_move_up_and_down_without_changing_history():
+    client = app_module.app.test_client()
+    for name in ['先頭', '中間', '最後']:
+        post(client, '/tasks', data={'name': name})
+    post(client, '/tasks/2/session', data={'start_time': '09:00', 'end_time': '09:20'})
+    assert post(client, '/tasks/3/move', data={'direction': 'up'}).status_code == 302
+    with app_module.get_db() as db:
+        names = [row[0] for row in db.execute('SELECT name FROM tasks WHERE deleted_at IS NULL ORDER BY sort_order, id')]
+        assert db.execute('SELECT task_id, duration_minutes FROM task_sessions').fetchone()[:] == (2, 20)
+    assert names == ['先頭', '最後', '中間']
+    assert post(client, '/tasks/3/move', data={'direction': 'down'}).status_code == 302
+    assert post(client, '/tasks/1/move', data={'direction': 'up'}).status_code == 400
+    page = client.get('/').get_data(as_text=True)
+    assert page.index('<h3>先頭</h3>') < page.index('<h3>中間</h3>') < page.index('<h3>最後</h3>')
+
+
+def test_week_and_month_task_charts_use_separate_date_ranges_and_keep_archived_tasks():
+    from datetime import date
+    with app_module.get_db() as db:
+        db.execute("INSERT INTO tasks(id, name, created_at, sort_order) VALUES (1, '資料', 'test', 1)")
+        db.execute("INSERT INTO tasks(id, name, created_at, sort_order, deleted_at) VALUES (2, '会議', 'test', 2, 'test')")
+        for task_id, work_date, minutes in [
+            (1, '2026-10-25', 30),  # 前週
+            (1, '2026-10-26', 60),  # 対象週・月
+            (2, '2026-10-27', 30),  # 削除済みタスク
+            (1, '2026-11-01', 90),  # 対象週、翌月
+        ]:
+            db.execute("INSERT INTO task_sessions(task_id, work_date, start_time, end_time, duration_minutes, created_at) "
+                       "VALUES (?, ?, '09:00', '10:00', ?, 'test')", (task_id, work_date, minutes))
+        db.commit()
+        week = app_module.weekly_summary(db, date(2026, 10, 28))
+        month = app_module.monthly_overtime(db, date(2026, 10, 28))
+    assert [(item['name'], item['minutes']) for item in week['task_totals']] == [('資料', 150), ('会議', 30)]
+    assert [(item['name'], item['minutes']) for item in month['task_totals']] == [('資料', 90), ('会議', 30)]
+    assert week['task_totals'][0]['percent'] == 83.3
+    assert month['task_totals'][0]['percent'] == 75.0
+
+
 def test_day_rollover_and_persistence(monkeypatch):
     from datetime import date
     client = app_module.app.test_client()

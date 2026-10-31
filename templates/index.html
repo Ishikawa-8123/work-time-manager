@@ -88,6 +88,10 @@
         <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('入力一覧からタスクを削除しますか？過去の作業履歴は残ります。');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="form_date" value="{{ form_date }}">
           <button class="danger ghost" type="submit">削除</button>
         </form>
+        <div class="task-order" aria-label="{{ task.name }} の表示順">
+          {% if not loop.first %}<form method="post" action="{{ url_for('move_task', task_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="up"><button type="submit" class="compact">↑ 上へ</button></form>{% endif %}
+          {% if not loop.last %}<form method="post" action="{{ url_for('move_task', task_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="down"><button type="submit" class="compact">↓ 下へ</button></form>{% endif %}
+        </div>
       </article>
     {% endfor %}
   </div>
@@ -117,6 +121,7 @@
               <details class="log-edit"><summary>編集</summary>
                 <form method="post" action="{{ url_for('edit_session', session_id=s.id) }}" class="log-edit-form">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="work_date" value="{{ today }}">
                   <label>タスク <select name="task_id" required>
                     {% for task in tasks %}<option value="{{ task.id }}" {% if task.id == s.task_id %}selected{% endif %}>{{ task.name }}</option>{% endfor %}
                     {% if not tasks|selectattr('id', 'equalto', s.task_id)|list %}<option value="{{ s.task_id }}" selected>{{ s.task_name }}（一覧から削除済み）</option>{% endif %}

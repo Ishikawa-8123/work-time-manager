@@ -49,7 +49,7 @@
   {% else %}<p>該当する記録はありません。</p>{% endfor %}
 </section>
 
-<section class="card">
+<section class="card" id="task-history">
   <h2>日ごとのタスク作業履歴</h2>
   {% for work_date, group in days.items() %}
   <section class="history-day">
@@ -59,7 +59,18 @@
       <thead><tr><th>タスク</th><th>内容</th><th>開始</th><th>終了</th><th>時間</th><th></th></tr></thead>
       <tbody>{% for row in group.rows %}
         <tr><td><a href="{{ url_for('history', task_id=row.task_id) }}">{{ row.name }}</a></td><td class="content-cell">{{ row.content or '--' }}</td><td>{{ row.start_time }}</td><td>{{ row.end_time }}</td><td>{{ row.duration_minutes|minutes }}</td>
-          <td><form method="post" action="{{ url_for('delete_session', session_id=row.id) }}" onsubmit="return confirm('この作業記録を履歴から削除しますか？この操作は元に戻せません。');">
+          <td><details class="log-edit"><summary>編集</summary>
+            <form method="post" action="{{ url_for('edit_session', session_id=row.id) }}" class="log-edit-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="work_date" value="{{ row.work_date }}"><input type="hidden" name="return_to" value="history">
+              <label>タスク <select name="task_id" required>
+                {% for task in tasks if not task.deleted_at or task.id == row.task_id %}<option value="{{ task.id }}" {% if task.id == row.task_id %}selected{% endif %}>{{ task.name }}{% if task.deleted_at %}（一覧から削除済み）{% endif %}</option>{% endfor %}
+              </select></label>
+              <label>内容 <textarea name="content" rows="2" maxlength="2000">{{ row.content }}</textarea></label>
+              <label>開始 <input type="time" name="start_time" value="{{ row.start_time }}" required></label>
+              <label>終了 <input type="time" name="end_time" value="{{ row.end_time }}" required></label>
+              <button type="submit">変更を保存</button>
+            </form>
+          </details><form method="post" action="{{ url_for('delete_session', session_id=row.id) }}" onsubmit="return confirm('この作業記録を履歴から削除しますか？この操作は元に戻せません。');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="history">
             <button class="danger ghost compact" type="submit">記録を削除</button>
           </form></td>

@@ -40,9 +40,17 @@
   <p>勤怠・タスク欄は元の記録の変更に合わせて更新されます。共通メモとは別に、この日付の追記として保存されます。</p>
 </section>
 {% include "_week.html" %}
+<section class="card" id="monthly-tasks">
+  <div class="section-head"><div><span class="eyebrow">MONTHLY TASKS</span><h2>{{ month.month }} のタスク別時間</h2></div></div>
+  <p>選択した月の作業ログをタスク名ごとに集計します。棒はその月のタスク時間全体に占める割合です。</p>
+  <div class="period-task-list">
+    {% for task in month.task_totals %}<div class="period-task-row"><div><a href="{{ url_for('history', task_id=task.id) }}">{{ task.name }}</a><strong>{{ task.minutes|minutes }}</strong></div><div class="period-task-track"><span style="width: {{ task.percent }}%"></span></div><small>月のタスク時間の {{ task.percent }}%</small></div>
+    {% else %}<p>この月の作業記録はありません。</p>{% endfor %}
+  </div>
+</section>
 <section class="card" id="monthly-overtime">
   <div class="section-head"><div><span class="eyebrow">MONTHLY OVERTIME</span><h2>{{ month.month }} の残業時間</h2></div></div>
-  <p>上で選択した日付の月を集計します。平日は勤怠を完了した日ごとに8時間を基準とし、月内の超過時間と不足時間を相殺します（差：{{ month.weekday_balance|signed_minutes }}）。未記録・未完了の日は基準に含めません（未完了 {{ month.incomplete }}日）。土日は全実働を別枠で加算します。</p>
+  <p>残業はタスク時間ではなく、保存した勤怠の開始〜終了から休憩を引いた実働を基に計算します。選択した月の平日は勤怠を完了した日ごとに8時間を基準とし、月内の超過時間と不足時間を相殺します（差：{{ month.weekday_balance|signed_minutes }}）。未記録・未完了の日は基準に含めません（未完了 {{ month.incomplete }}日）。土日は全実働を別枠で加算します。</p>
   <div class="summary-row overtime-summary">
     <div><span>平日の残業</span><b>{{ month.weekday_overtime|minutes }}</b></div>
     <div><span>土日の残業（別枠）</span><b>＋{{ month.weekend_overtime|minutes }}</b></div>

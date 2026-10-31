@@ -13,11 +13,17 @@
     {% endfor %}</tbody>
     <tfoot><tr><th>合計</th><td>{{ week.gross|minutes }}</td><td>{{ week.break|minutes }}</td><td>{{ week.net|minutes }}</td><td>{{ week.task_minutes|minutes }}</td></tr></tfoot>
   </table></div>
+  <h3>この週のタスク別時間</h3>
+  <p>作業ログに記録された時間の内訳です。タスク名を選ぶと履歴を確認できます。</p>
+  <div class="period-task-list">
+    {% for task in week.task_totals %}<div class="period-task-row"><div><a href="{{ url_for('history', task_id=task.id) }}">{{ task.name }}</a><strong>{{ task.minutes|minutes }}</strong></div><div class="period-task-track"><span style="width: {{ task.percent }}%"></span></div><small>週のタスク時間の {{ task.percent }}%</small></div>
+    {% else %}<p>この週の作業記録はありません。</p>{% endfor %}
+  </div>
   <div class="summary-row overtime-summary">
     <div><span>平日の残業（8時間未満の日と相殺後）</span><b>{{ week.weekday_overtime|minutes }}</b></div>
     <div><span>土日の残業（実働全時間）</span><b>＋{{ week.weekend_overtime|minutes }}</b></div>
     <div><span>週の残業合計</span><b>{{ week.overtime|minutes }}</b></div>
   </div>
-  <p>平日は勤怠を完了した日ごとに8時間を基準とし、この週の超過時間と不足時間を相殺します（差：{{ week.weekday_balance|signed_minutes }}）。未記録・未完了の日は基準に含めません。土日は別枠で全実働を加算します。</p>
+  <p>残業はタスク時間ではなく、勤怠の開始〜終了から休憩を引いた実働を基に計算します。平日は勤怠を完了した日ごとに8時間を基準とし、この週の超過時間と不足時間を相殺します（差：{{ week.weekday_balance|signed_minutes }}）。未記録・未完了の日は基準に含めません。土日は別枠で全実働を加算します。</p>
   <p><a href="{{ url_for('calendar_view', view='week', date=week.start) }}">この週のタスクをカレンダーで見る</a></p>
 </section>
