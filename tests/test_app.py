@@ -119,6 +119,45 @@ def test_edit_past_session_from_history_updates_period_totals(monkeypatch):
     assert '勤怠の開始〜終了から休憩を引いた実働' in page
 
 
+def test_add_and_delete_past_work_log_from_history(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, 'today_jst', lambda: date(2026, 10, 31))
+    post(client, '/tasks', data={'name': '定常業務'})
+    page = client.get('/history?date=2026-10-19').get_data(as_text=True)
+    assert '過去日の作業記録を追加' in page and 'value="2026-10-19"' in page
+    response = post(client, '/history/sessions', data={
+        'work_date': '2026-10-19', 'task_id': '1', 'content': 'メール確認',
+        'start_time': '11:00', 'end_time': '11:20',
+    })
+    assert response.status_code == 302 and '/history?date=2026-10-19' in response.headers['Location']
+    with app_module.get_db() as db:
+        row = db.execute('SELECT id, work_date, duration_minutes, content FROM task_sessions').fetchone()
+        week = app_module.weekly_summary(db, date(2026, 10, 19))
+    assert row['work_date'] == '2026-10-19' and row['duration_minutes'] == 20
+    assert week['task_minutes'] == 20 and week['task_totals'][0]['name'] == '定常業務'
+    assert 'メール確認' in client.get('/reports?date=2026-10-19').get_data(as_text=True)
+    response = post(client, f'/sessions/{row["id"]}/delete', data={'return_to': 'history'})
+    assert '/history?date=2026-10-19' in response.headers['Location']
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM task_sessions').fetchone()[0] == 0
+
+
+def test_add_past_log_rejects_invalid_or_archived_task(monkeypatch):
+    from datetime import date
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, 'today_jst', lambda: date(2026, 10, 31))
+    post(client, '/tasks', data={'name': '旧タスク'})
+    post(client, '/tasks/1/delete')
+    base = {'work_date': '2026-10-19', 'task_id': '1', 'start_time': '09:00', 'end_time': '10:00'}
+    assert post(client, '/history/sessions', data=base).status_code == 400
+    post(client, '/tasks', data={'name': '現行タスク'})
+    assert post(client, '/history/sessions', data={**base, 'task_id': '2', 'work_date': '2026-11-01'}).status_code == 400
+    assert post(client, '/history/sessions', data={**base, 'task_id': '2', 'end_time': '09:00'}).status_code == 400
+    with app_module.get_db() as db:
+        assert db.execute('SELECT count(*) FROM task_sessions').fetchone()[0] == 0
+
+
 def test_task_order_can_move_up_and_down_without_changing_history():
     client = app_module.app.test_client()
     for name in ['先頭', '中間', '最後']:
@@ -273,7 +312,7 @@ def test_history_filters_task_independently_of_content(monkeypatch):
     text = client.get('/history?task_id=1').get_data(as_text=True)
     assert '月次資料' in text and '週次資料' in text
     assert '2026-10-19' in text and '2026-10-20' in text
-    assert '2026-10-21' not in text
+    assert '<h3><a href="/history?date=2026-10-21' not in text
     assert '5時間 0分（300分）' in text
     text = client.get('/history?date=2026-10-20&task_id=1').get_data(as_text=True)
     assert '週次資料' in text and '月次資料' not in text

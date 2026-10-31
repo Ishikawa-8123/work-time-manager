@@ -89,6 +89,8 @@ summary { cursor: pointer; }
 .log-edit { margin: 0 0 8px; }
 .log-edit-form { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 10px; min-width: 340px; margin: 12px 0; }
 .log-edit-form button { grid-column: 1 / -1; }
+.history-add-form { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+.history-add-form .history-add-content, .history-add-form button { grid-column: 1 / -1; }
 .task-subtotal { background: #f2f6fc; }
 .task-subtotal th, .task-subtotal td { font-size: 13px; font-weight: 700; }
 #daily-note-content, #note-content { display: block; margin: 9px 0 12px; }
@@ -149,4 +151,5 @@ th { color: #6b7785; font-size: 11px; text-transform: uppercase; letter-spacing:
   .session-form label { width: calc(50% - 18px); }
   .rename-form, .log-edit-form { display: block; min-width: 0; }
   .rename-form label, .log-edit-form label { margin: 8px 0; }
+  .history-add-form { grid-template-columns: 1fr; }
 }

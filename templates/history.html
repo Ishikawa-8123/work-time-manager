@@ -18,6 +18,22 @@
   <p>絞り込み結果のタスク時間：<strong>{{ total_minutes|minutes }}</strong></p>
 </section>
 
+<section class="card" id="add-history-log">
+  <h2>過去日の作業記録を追加</h2>
+  <p>日付・タスク・内容・時刻を指定して追加します。保存すると日報と週・月のタスク時間にも反映されます。</p>
+  {% if tasks|rejectattr('deleted_at')|list %}
+  <form method="post" action="{{ url_for('add_history_session') }}" class="history-add-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>作業日 <input type="date" name="work_date" value="{{ selected_date or form_date }}" max="{{ form_date }}" required></label>
+    <label>タスク <select name="task_id" required>{% for task in tasks if not task.deleted_at %}<option value="{{ task.id }}" {% if selected_task == task.id|string %}selected{% endif %}>{{ task.name }}</option>{% endfor %}</select></label>
+    <label class="history-add-content">内容 <textarea name="content" rows="2" maxlength="2000" placeholder="例：メール確認"></textarea></label>
+    <label>開始 <input type="time" name="start_time" required></label>
+    <label>終了 <input type="time" name="end_time" required></label>
+    <button class="primary" type="submit">この日の記録を追加</button>
+  </form>
+  {% else %}<p>追加できるタスクがありません。<a href="{{ url_for('index') }}#tasks">今日の画面でタスクを追加</a>してください。</p>{% endif %}
+</section>
+
 {% if not selected_task %}
 <section class="card">
   <div class="section-head"><div><h2>勤怠履歴</h2></div></div>

@@ -607,12 +607,47 @@ def edit_session(session_id: int):
 @app.post("/sessions/<int:session_id>/delete")
 def delete_session(session_id: int):
     with closing(get_db()) as db:
+        work_session = db.execute("SELECT work_date FROM task_sessions WHERE id = ?", (session_id,)).fetchone()
+        if not work_session:
+            abort(404)
         db.execute("DELETE FROM task_sessions WHERE id = ?", (session_id,))
         db.commit()
     flash("時間記録を削除しました。", "success")
     if request.form.get("return_to") == "history":
-        return redirect(url_for("history"))
+        return redirect(url_for("history", date=work_session["work_date"]) + "#task-history")
     return redirect(url_for("index"))
+
+
+@app.post("/history/sessions")
+def add_history_session():
+    if not request.form.get("work_date"):
+        abort(400, "作業日を指定してください。")
+    work_date = selected_date(request.form["work_date"])
+    if work_date > today_jst():
+        abort(400, "未来の日付に作業記録は追加できません。")
+    start_time = request.form.get("start_time") or ""
+    end_time = request.form.get("end_time") or ""
+    duration = minutes_between(start_time, end_time)
+    content = (request.form.get("content") or "").strip()
+    if duration is None or not 0 < duration <= 24 * 60 or len(content) > 2000:
+        abort(400, "作業内容・開始時刻・終了時刻を確認してください。")
+    try:
+        task_id = int(request.form.get("task_id", ""))
+    except ValueError:
+        abort(400, "タスクを選択してください。")
+    with closing(get_db()) as db:
+        task = db.execute("SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL", (task_id,)).fetchone()
+        if not task:
+            abort(400, "利用できるタスクを選択してください。")
+        db.execute(
+            "INSERT INTO task_sessions(task_id, work_date, start_time, end_time, duration_minutes, created_at, content) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, work_date.isoformat(), start_time, end_time, duration,
+             now_jst().isoformat(timespec="seconds"), content),
+        )
+        db.commit()
+    flash("過去日の作業記録を追加しました。", "success")
+    return redirect(url_for("history", date=work_date.isoformat()) + "#task-history")
 
 
 @app.get("/history")
@@ -636,7 +671,7 @@ def history():
             "SELECT * FROM attendance " + ("WHERE work_date = ? " if work_date else "")
             + "ORDER BY work_date DESC", (work_date,) if work_date else ()
         ).fetchall()
-        tasks = db.execute("SELECT id, name, deleted_at FROM tasks ORDER BY name, id").fetchall()
+        tasks = db.execute("SELECT id, name, deleted_at FROM tasks ORDER BY sort_order, id").fetchall()
         task_rows = db.execute(
             f"""
             SELECT s.id, s.task_id, s.work_date, t.name, s.content, s.start_time, s.end_time, s.duration_minutes
